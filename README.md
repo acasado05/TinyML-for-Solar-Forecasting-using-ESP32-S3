@@ -1,55 +1,95 @@
-☀️ TinyML Solar Forecasting (ESP32-S3)
-Implementación de Redes Neuronales Recurrentes (GRU) para la predicción de potencia fotovoltaica en el Edge.
+# 🌬️ Predicción de Calidad del Aire con Redes Neuronales GRU
 
-Este repositorio contiene el desarrollo técnico de mi Trabajo de Fin de Grado. El objetivo es predecir la producción de energía solar con un horizonte de 1 hora utilizando datos en tiempo real de inversores Fronius, procesados íntegramente en un microcontrolador ESP32-S3.
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange.svg) ![Scikit-learn](https://img.shields.io/badge/Scikit--learn-brightgreen.svg)
 
-🚀 Características Principales
-Inteligencia Artificial en el Edge: Inferencia local sin dependencia de la nube (Cloudless AI).
+Este proyecto utiliza una red neuronal recurrente de tipo **GRU (Gated Recurrent Unit)** para predecir la calidad del aire, basándose en el conjunto de datos "Air Quality UCI". El modelo se entrena para pronosticar la temperatura en función de datos históricos de sensores de calidad del aire y variables de tiempo.
 
-Modelo GRU (Gated Recurrent Unit): Arquitectura optimizada para series temporales y bajo consumo de memoria.
+---
 
-Ingeniería de Características: Codificación cíclica del tiempo (Seno/Coseno) para capturar la estacionalidad solar.
+## 🚀 Características Principales
 
-Pipeline Completo: Desde la extracción de datos vía API/Modbus hasta la conversión a cabeceras de C++ para TinyML.
+-   **Modelo GRU:** Arquitectura de red neuronal optimizada para el análisis de secuencias y series temporales.
+-   **Preprocesamiento de Datos:** Limpieza, imputación de valores faltantes y normalización de los datos para un rendimiento óptimo del modelo.
+-   **Ingeniería de Características:** Creación de variables cíclicas (seno/coseno) para codificar el tiempo (hora, mes) y capturar patrones estacionales.
+-   **Evaluación Rigurosa:** Métricas como RMSE, MAE y R² para evaluar la precisión de las predicciones.
+-   **Visualización de Resultados:** Gráficas claras para interpretar el rendimiento del modelo y la correlación entre variables.
 
-📂 Estructura del Proyecto
-Plaintext
-├── training/            # Notebooks y scripts de entrenamiento (Keras/TensorFlow)
-├── model/               # Modelos exportados (.h5, .tflite, model_data.h)
-├── src_esp32/           # Código fuente C++ para la placa ESP32-S3
-├── data/                # Datasets de entrenamiento y validación
-└── docs/                # Gráficas de rendimiento y documentación del TFG
-🛠️ Stack Tecnológico
-Entrenamiento: Python, TensorFlow/Keras, Scikit-learn, Pandas.
+---
 
-Inferencia Embebida: C++, TensorFlow Lite for Microcontrollers.
+## 📊 Resultados
 
-Hardware: ESP32-S3 (Dual-core, 512KB SRAM).
+A continuación se muestran los resultados obtenidos tras el entrenamiento y la evaluación del modelo.
 
-Visualización: Matplotlib, Seaborn.
+### Matriz de Correlación de Características
 
-📈 Resultados del Modelo
-El modelo utiliza una ventana deslizante de 6 horas de historia para predecir el siguiente intervalo. Se incluyen análisis de:
+Esta matriz muestra la relación lineal entre las variables de entrada utilizadas. Ayuda a entender qué sensores o factores están más relacionados entre sí.
 
-Matriz de Correlación: Impacto de la temperatura y humedad en la producción.
+![Matriz de Correlación](correlacion_matriz.png)
 
-Curvas de Pérdida: Visualización de la convergencia (Train vs Validation Loss).
+### Pérdida de Entrenamiento y Validación
 
-Predicción Real: Comparativa de la potencia predicha frente a la lectura real del inversor.
+La gráfica muestra cómo la pérdida del modelo (error) disminuye a lo largo de las épocas de entrenamiento, tanto para el conjunto de datos de entrenamiento como para el de validación.
 
-🔧 Instalación y Uso rápido
-Clonar el repo:
+![Pérdida de Entrenamiento y Validación](training_validation_loss.png)
 
-Bash
-git clone https://github.com/acasado05/TinyML-for-Solar-Forecasting-using-ESP32-S3.git
-Instalar dependencias:
+### Predicciones vs. Valores Reales
 
-Bash
-pip install -r requirements.txt
-Ejecutar entrenamiento:
-Ver training/gru_training.py para generar el modelo optimizado.
+Esta gráfica compara los valores de temperatura predichos por el modelo con los valores reales, demostrando la capacidad de seguimiento de la tendencia del modelo.
 
-✍️ Autor
-Aitor Casado - Estudiante de Ingeniería Electrónica - UPM
+![Predicciones vs. Valores Reales](predicted_vs_actual.png)
 
-LinkedIn: [Tu enlace aquí]
+---
+
+## 🛠️ Cómo Empezar
+
+Sigue estos pasos para ejecutar el proyecto en tu entorno local.
+
+### Prerrequisitos
+
+-   Python 3.9 o superior
+-   Pip (gestor de paquetes de Python)
+
+### Instalación
+
+1.  **Clona el repositorio:**
+    ```sh
+    git clone <URL_DEL_REPOSITORIO>
+    cd GRU_training
+    ```
+
+2.  **Crea un entorno virtual (recomendado):**
+    ```sh
+    python -m venv .venv
+    source .venv/bin/activate  # En Windows: .\.venv\Scripts\activate
+    ```
+
+3.  **Instala las dependencias:**
+    El archivo `requirements.txt` contiene todas las librerías necesarias.
+    ```sh
+    pip install -r requirements.txt
+    ```
+
+### Ejecución
+
+Para entrenar el modelo y generar los resultados, ejecuta el script principal:
+
+```sh
+python gru_aq_v1.py
+```
+
+El script cargará los datos de `AirQualityUCI.csv`, los procesará, entrenará el modelo GRU y guardará las gráficas de resultados en el directorio raíz.
+
+---
+
+## 📦 Dependencias
+
+Este proyecto utiliza las siguientes librerías de Python:
+
+-   `pandas`
+-   `numpy`
+-   `tensorflow`
+-   `matplotlib`
+-   `scikit-learn`
+-   `seaborn`
+
+Todas están incluidas en el archivo `requirements.txt`.

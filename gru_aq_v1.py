@@ -78,3 +78,27 @@ plt.show()
 # --- ESCALADO DE LOS DATOS ---
 scaler = StandardScaler()  
 data_scaled = scaler.fit_transform(data_selected)
+
+# Función para crear secuencias multivariadas: se usan 10 filas
+# para predecir la siguiente fila
+def create_multivariate_sequences(data, sequence_length=10):
+    X, y = [], []
+    for i in range(len(data) - sequence_length):
+        X.append(data[i:i + sequence_length])    # Secuencia de entrada
+        y.append(data[i + sequence_length, -1])  # Valor objetivo T
+    return np.array(X), np.array(y)
+
+sequence_length = 10
+X, y = create_multivariate_sequences(data_scaled, sequence_length)
+
+# Las GRU esperan una entrada de forma (samples, timesteps, features)
+print(f"FORMA DE X: {X.shape}")  # (n_samples, sequence_length, n_features)
+print(f"FORMA DE y: {y.shape}")  # (n_samples)
+
+# Asegura la forma correcta del tensor 3D al modelo GRU
+X = X.reshape(X.shape[0], sequence_length, len(features)) 
+
+# Selección de datos de entrenamiento y validación
+train_size = int(0.8 * len(X))
+X_train, X_val = X[:train_size], X[train_size:]
+y_train, y_val = y[:train_size], y[train_size:]
