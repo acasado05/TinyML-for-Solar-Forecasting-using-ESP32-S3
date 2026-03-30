@@ -4,9 +4,9 @@ import seaborn as sns
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.layers import Input, GRU, Dense
+from tensorflow.keras.layers import Input, GRU, Dense, Dropout
 from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
@@ -88,7 +88,7 @@ def create_multivariate_sequences(data, sequence_length=10):
         y.append(data[i + sequence_length, -1])  # Valor objetivo T
     return np.array(X), np.array(y)
 
-sequence_length = 10
+sequence_length = 15
 X, y = create_multivariate_sequences(data_scaled, sequence_length)
 
 # Las GRU esperan una entrada de forma (samples, timesteps, features)
@@ -98,7 +98,36 @@ print(f"FORMA DE y: {y.shape}")  # (n_samples)
 # Asegura la forma correcta del tensor 3D al modelo GRU
 X = X.reshape(X.shape[0], sequence_length, len(features)) 
 
-# Selección de datos de entrenamiento y validación
+# Selección de datos de entrenamiento y validación (80%/20%)
 train_size = int(0.8 * len(X))
 X_train, X_val = X[:train_size], X[train_size:]
 y_train, y_val = y[:train_size], y[train_size:]
+
+#5. Construcción del modelo GRU
+model = Sequential([Input(shape=(sequence_length, len(features))),
+                    GRU(32, activation='tanh', return_sequences=False),
+                    Dropout(0.2), #20% de dropout para evitar overfitting
+                    Dense(16, activation='relu'),
+                    Dense(1)  # Capa de salida para regresión
+                    ])
+
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+model.summary()
+
+#6. Entrenar el modelo
+#early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
+
+#reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3 , min_lr=1e-6, verbose=1)  
+
+#print("INICIANDO EL ENTRENAMIENTO...")
+#history = model.fit(X_train, y_train, 
+                    #epochs=50, 
+                    #batch_size=32, 
+                    #validation_split=0.2,
+                    #validation_data=(X_val, y_val), 
+                    #callbacks=[early_stopping, reduce_lr],
+                    #verbose=1)
+
+#model.save('gru_aq_model.h5')
+#print("MODELO GUARDADO COMO 'gru_aq_model.h5'")
