@@ -77,6 +77,8 @@ X = X.reshape((X.shape[0], sequence_length, len(features))) # Asegura que X teng
 train_size = int(len(X) * 0.8)
 X_train, X_test = X[:train_size], X[train_size:]
 y_train, y_test = y[:train_size], y[train_size:]
+# Aqui realmente estoy usando lo mismo para entrenar y para validar, pero lo importante es que el modelo entienda el formato de los datos. 
+# En la siguiente versión, se hará una división real entre entrenamiento y validación.
 
 # Para construir es necesario importar tensorflow, y luego API de keras para models y layers. En este caso, hay dos modelos GRUs.
 # Son varias capas. El input es la puerta de entrada. Va a recibir un bloque de 10 horas seguidas. Y en cada hora, hay 5 datos.
