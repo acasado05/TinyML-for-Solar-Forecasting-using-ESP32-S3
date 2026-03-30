@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.layers import Input, GRU, Dense, Dropout
 from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -115,25 +115,29 @@ print(f"FORMA DE y: {y_train.shape}")  # (n_samples)
 # 5. CONSTRUCCIÓN DEL MODELO GRU
 model = Sequential([Input(shape=(sequence_length, len(features))),
                     GRU(32, activation='tanh', return_sequences=False),
-                    Dropout(0.2), #20% de dropout para evitar overfitting
+                    Dropout(0.1), #20% de dropout para evitar overfitting
+                    #Dense(32, activation='relu'), # Se aumenta la densidad para V2
                     Dense(16, activation='relu'),
+                    Dense(8, activation='relu'), # Se añade una capa adicional para V3 para limpiar la salida
                     Dense(1)  # Capa de salida para regresión
                     ])
 
-model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+optimizer = keras.optimizers.Adam(learning_rate=0.001)
+model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
 
 model.summary()
 
 # 6. ENTRENAMIENTO DEL MODELO
-early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True, verbose=1)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3 , min_lr=1e-6, verbose=1)  
+early_stopping = EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4 , min_lr=1e-6, verbose=1) 
+checkpoint = keras.callbacks.ModelCheckpoint('best_gru_aq_model.keras', monitor='val_loss', save_best_only=True, verbose=1)
 
 print("INICIANDO EL ENTRENAMIENTO...")
 history = model.fit(X_train, y_train, 
-                    epochs=50, 
+                    epochs=70, 
                     batch_size=32, 
                     validation_data=(X_val, y_val), 
-                    callbacks=[early_stopping, reduce_lr],
+                    callbacks=[early_stopping, reduce_lr, checkpoint],
                     verbose=1)
 
 #model.save('gru_aq_model.h5')
@@ -194,6 +198,9 @@ plt.ylabel('Mean Squared Error')
 plt.legend()
 plt.grid(True, linestyle='--', alpha=0.7)
 
+# Si training_loss >> validation_loss, es posible que el modelo esté subentrenado (underfitting).
+# Si training_loss << validation_loss, es posible que el modelo esté sobreentrenado (overfitting).
+
 # --- 8.2 GRÁFICA DE DISPERSIÓN Y REGRESIÓN ---
 plt.subplot(1, 3, 2)
 sns.scatterplot(x=y_true_rescaled, y=y_pred_rescaled, alpha=0.5, color='#2ca02c')
@@ -234,7 +241,7 @@ plt.legend(loc='upper right')
 plt.grid(True, alpha=0.3)
 
 # Guardamos en tu nueva carpeta de gráficas
-plt.savefig(f'{output_folder}/comparativa_temporal_lineas.png', dpi=300, bbox_inches='tight')
+plt.savefig(f'{output_folder}/temp_real_vs_pred_v1.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 # Instrucción para obtener el número de parámetros
