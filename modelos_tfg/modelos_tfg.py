@@ -59,10 +59,23 @@ print(f"------------------------------------------------------------------------
 print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
-# Matriz de correlación
+# 2.4. Matriz de correlación
 corr_matrix = data_selected.corr()
 plt.figure(figsize=(12, 10))
 sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
 plt.title('Matriz de Correlación')
 plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+# 2.5. Gráfica de la irradiancia global a lo largo del tiempo
+plt.figure(figsize=(12, 5))
+plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+plt.xlabel('Fecha', fontsize=12)
+plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+plt.legend(loc='upper right')
+plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+plt.gcf().autofmt_xdate() 
+plt.tight_layout()
+plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
 plt.show()
