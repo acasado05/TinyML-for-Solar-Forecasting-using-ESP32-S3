@@ -1,8 +1,10 @@
-# 🌬️ Repositorio para TFG: Sistema embebido basado en Edge AI y TinyML para predicción local de potencia fotovoltaica
+# ☀️ Repositorio para TFG: Sistema embebido basado en Edge AI y TinyML para predicción local de potencia fotovoltaica
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange.svg) ![Scikit-learn](https://img.shields.io/badge/Scikit--learn-brightgreen.svg)
 
-Este proyecto utiliza una red neuronal recurrente de tipo **GRU (Gated Recurrent Unit)** para predecir la calidad del aire, basándose en el conjunto de datos "Air Quality UCI". El modelo se entrena para pronosticar la temperatura en función de datos históricos de sensores de calidad del aire y variables de tiempo.
+Este repositorio está hecho para subir el código correspondiente al entrenamiento de los modelos RNN (Redes Neuronales Recurrentes) empleados en el desarrollo e implementación de mi trabajo de fin de grado.
+La metodología a seguir es la siguiente. Primero se van a entrenar a tres modelos distintos, con datos generados sintéticamente mediante PVGIS cada 10 minutos. Los modelos son una **RNN simple**, una **LSTM (Long-Short Term Memory)** y una **GRU (Gated Recurrent Unit)**. Una vez evaluados, se escogerá a la mejor para otro posterior entrenamiento (con datos generados sintéticamente mediante PVGIS nuevamente) pero esta vez con
+datos cada 15 minutos.
 
 ---
 
@@ -87,7 +89,7 @@ Este proyecto utiliza las siguientes librerías de Python:
 
 -   `pandas`
 -   `numpy`
--   `tensorflow`
+-   `tensorflow` y `keras`
 -   `matplotlib`
 -   `scikit-learn`
 -   `seaborn`
