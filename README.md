@@ -1,4 +1,4 @@
-# 🌬️ Predicción de Calidad del Aire con Redes Neuronales GRU
+# 🌬️ Repositorio para TFG: Sistema embebido basado en Edge AI y TinyML para predicción local de potencia fotovoltaica
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg) ![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-orange.svg) ![Scikit-learn](https://img.shields.io/badge/Scikit--learn-brightgreen.svg)
 
