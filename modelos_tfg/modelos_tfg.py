@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import os
+import time
 
 import tensorflow as tf
 from tensorflow import keras
@@ -60,22 +61,135 @@ print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
 # 2.4. Matriz de correlación
-corr_matrix = data_selected.corr()
-plt.figure(figsize=(12, 10))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-plt.title('Matriz de Correlación')
-plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-plt.show()
+# corr_matrix = data_selected.corr()
+# plt.figure(figsize=(12, 10))
+# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+# plt.title('Matriz de Correlación')
+# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
 # 2.5. Gráfica de la irradiancia global a lo largo del tiempo
-plt.figure(figsize=(12, 5))
-plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
-plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
-plt.xlabel('Fecha', fontsize=12)
-plt.ylabel('Irradiancia (W/m²)', fontsize=12)
-plt.legend(loc='upper right')
-plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
-plt.gcf().autofmt_xdate() 
-plt.tight_layout()
-plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
-plt.show()
+# plt.figure(figsize=(12, 5))
+# plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+# plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+# plt.xlabel('Fecha', fontsize=12)
+# plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+# plt.legend(loc='upper right')
+# plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+# plt.gcf().autofmt_xdate() 
+# plt.tight_layout()
+# plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
+# plt.show()
+
+# 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
+
+# 3.1. División de los datos en conjuntos de entrenamiento y prueba
+train_split = int(0.8 * len(data_selected))
+train_df = data_selected.iloc[:train_split]
+val_df = data_selected.iloc[train_split:]
+
+print(f"Entrenamiento (80%): {len(train_df)} filas")
+print(f"Validación (20%): {len(val_df)} filas")
+
+# 3.2. Normalización de los datos utilizando MinMaxScaler
+scaler = MinMaxScaler()
+transformed_train = scaler.fit_transform(train_df)
+transformed_val = scaler.transform(val_df)
+
+# 3.3. Función para crear secuencias de datos para el modelo
+def create_multivariate_sequences(X, y, seq_length, look_ahead):
+    """
+    Transforma series temporales planas en ventanas deslizantes tridimensionales 
+    para el entrenamiento de Redes Neuronales Recurrentes (RNN, LSTM, GRU).
+
+    Esta función aplica la técnica de "Sliding Window" (Ventana Deslizante). 
+    Recorre el dataset cronológicamente extrayendo bloques de datos históricos 
+    como variables predictoras y asignando un valor futuro como objetivo.
+
+    Parámetros:
+    -----------
+    X : numpy.ndarray
+        Matriz bidimensional de características (features) escaladas. 
+        Forma esperada: (n_muestras, n_características).
+    y : numpy.ndarray
+        Vector unidimensional con la variable objetivo escalada (target).
+        Forma esperada: (n_muestras,).
+    seq_length : int
+        Tamaño de la ventana de observación (pasos de tiempo hacia el pasado).
+    look_ahead : int
+        Horizonte de predicción (cuántos pasos de tiempo hacia el futuro se desea predecir).
+
+    Retorna:
+    --------
+    tuple
+        X_seq : numpy.ndarray
+            Tensores de entrada 3D con forma (muestras, seq_length, características).
+        y_seq : numpy.ndarray
+            Array 1D con los valores objetivo correspondientes. Forma: (muestras,).
+    """
+    Xs, ys = [], []
+
+    # El bucle termina antes para evitar predecir un dato a futuro que no existe.
+    limite = len(X) - seq_length - look_ahead + 1
+
+    for i in range(limite):
+        
+        # Extraemos la ventana de datos históricos para la secuencia actual
+        ventana_X = X[i:(i + seq_length)]
+
+        # Apuntamos al objetivo futuro. Si la ventana termina en i + sequence_length - 1,
+        # el objetivo está a 'look_ahead' pasos más allá.
+        objetivo_y = y[i + seq_length + look_ahead - 1]
+
+        Xs.append(ventana_X)
+        ys.append(objetivo_y)
+
+    return np.array(Xs), np.array(ys)
+
+sequence_length = 18 # Ventana de 3 horas
+look_ahead = 6       # Predecir 1 hora en el futuro
+X_train, y_train = create_multivariate_sequences(transformed_train, transformed_train[:, -1], sequence_length, look_ahead)
+X_val, y_val = create_multivariate_sequences(transformed_val, transformed_val[:, -1], sequence_length, look_ahead)
+
+# Las GRU esperan una entrada de forma (samples, timesteps, features)
+print(f"FORMA DE X: {X_train.shape}")  # (n_samples, sequence_length, n_features)
+print(f"FORMA DE y: {y_train.shape}")  # (n_samples)
+
+def create_model(model_type, input_shape):
+    
+    # 1. Elegimos la capa recurrente según lo que pida la función
+    if model_type == 'RNN':
+        capa_recurrente = SimpleRNN(64, activation='tanh', return_sequences=False)
+    elif model_type == 'LSTM':
+        capa_recurrente = LSTM(64, activation='tanh', return_sequences=False)
+    elif model_type == 'GRU':
+        capa_recurrente = GRU(64, activation='tanh', return_sequences=False)
+    
+    # 2. Construimos el modelo
+    model = Sequential([
+        Input(shape=input_shape),
+        capa_recurrente,
+        Dropout(0.2),
+        Dense(32, activation='relu'),
+        Dense(16, activation='relu'),
+        Dense(8, activation='relu'),
+        Dense(1)
+    ])
+
+    # 3. Compilamos el modelo
+    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
+
+    return model
+    
+# ====================================================
+# CREACIÓN DE LOS TRES MODELOS DE RNN (RNN, LSTM, GRU)
+# ====================================================
+forma_entrada = (sequence_length, X_train.shape[2])  # (18, n_features)
+
+print(f"CONSTRUYENDO ARQUITECTURAS DE LOS MODELOS...")
+model_RNN = create_model('RNN', forma_entrada)
+model_LSTM = create_model('LSTM', forma_entrada)
+model_GRU = create_model('GRU', forma_entrada)
+
+model_GRU.summary()
