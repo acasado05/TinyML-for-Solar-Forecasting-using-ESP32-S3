@@ -155,6 +155,7 @@ X_val, y_val = create_multivariate_sequences(transformed_val, transformed_val[:,
 print(f"FORMA DE X: {X_train.shape}")  # (n_samples, sequence_length, n_features)
 print(f"FORMA DE y: {y_train.shape}")  # (n_samples)
 
+# 4. CREACIÓN DE LOS MODELOS DE RNN, LSTM Y GRU
 def create_model(model_type, input_shape):
     
     # 1. Elegimos la capa recurrente según lo que pida la función
@@ -193,3 +194,29 @@ model_LSTM = create_model('LSTM', forma_entrada)
 model_GRU = create_model('GRU', forma_entrada)
 
 model_GRU.summary()
+
+
+early_stopping = EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4 , min_lr=1e-6, verbose=1)
+
+n_epochs = 100
+batch_size = 32
+
+def model_training(model, model_name):
+
+    print(f"\nINICIANDO ENTRENAMIENTO DEL MODELO {model_name}...")
+
+    tiempo_inicio = time.time()
+
+    history = model.fit(X_train, y_train,
+                        epochs=n_epochs,
+                        batch_size=batch_size,
+                        validation_data=(X_val, y_val),
+                        callbacks=[early_stopping, reduce_lr],
+                        verbose=1)
+    
+    tiempo_fin = time.time()
+    tiempo_ejecucion = tiempo_fin - tiempo_inicio
+    print(f"\nMODELO {model_name} ENTRENADO EN {tiempo_ejecucion:.2f} SEGUNDOS")
+
+# 5. Entrenamiento de los tres modelos
