@@ -219,4 +219,59 @@ def model_training(model, model_name):
     tiempo_ejecucion = tiempo_fin - tiempo_inicio
     print(f"\nMODELO {model_name} ENTRENADO EN {tiempo_ejecucion:.2f} SEGUNDOS")
 
+    return history
+
 # 5. Entrenamiento de los tres modelos
+print(f"\nCOMENZANDO EL ENTRENAMIENTO DE LOS MODELOS...")
+
+historial_RNN = model_training(model_RNN, 'Simple RNN')
+historial_LSTM = model_training(model_LSTM, 'LSTM')
+historial_GRU = model_training(model_GRU, 'GRU')
+
+print(f"\n ¡ENTRENAMIENTO COMPLETADO! LOS MODELOS HAN SIDO ENTRENADOS EXITOSAMENTE.")
+
+# 6. Cálculo de métricas reales de evaluación en el conjunto de validación
+print(f"\nEVALUANDO LOS MODELOS EN EL CONJUNTO DE VALIDACIÓN...")
+
+# 6.1. Recuperamos los valores reales de potencia (Desescalar y_val)
+# Creamos una matriz falsa de ceros con las 12 columnas originales
+num_columnas = X_train.shape[2]
+dummy_y = np.zeros((len(y_val), num_columnas))
+# Metemos y_val en la última columna de la matriz dummy
+dummy_y[:, -1] = y_val
+# Aplicamos la inversa de la transformación para recuperar los valores reales
+y_val_real = scaler.inverse_transform(dummy_y)[:, -1]
+
+# 6.2. Función para evaluar cada modelo y calcular métricas
+def evaluar_modelo(model, model_name):
+    # --- A. PREDICCIÓN Y DESESCALADO ---
+    predicciones = model.predict(X_val, verbose=0)
+    
+    dummy_pred = np.zeros((len(predicciones), num_columnas))
+    dummy_pred[:, -1] = predicciones.flatten()
+    predicciones_reales = scaler.inverse_transform(dummy_pred)[:, -1]
+    
+    # --- B. MÉTRICAS MATEMÁTICAS ---
+    rmse = np.sqrt(mean_squared_error(y_val_real, predicciones_reales))
+    mae = mean_absolute_error(y_val_real, predicciones_reales)
+    r2 = r2_score(y_val_real, predicciones_reales)
+    n = X_val.shape[0]; p = X_val.shape[2]
+    r2_ajustado = 1 - (1 - r2) * (n - 1) / (n - p - 1)
+    
+    # --- C. ESTIMACIÓN DE HARDWARE (TinyML) ---
+    total_params = model.count_params()
+    flash_kb = (total_params * 4) / 1024
+    
+    # --- D. IMPRIMIMOS RESULTADOS ---
+    print(f"| {model_name:10} | {mae:7.3f} kW | {rmse:7.3f} kW | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
+
+# 6.3. Imprimimos la tabla de resultados
+print("\n" + "="*83)
+print(f"| {'MODELO':10} | {'MAE':10} | {'RMSE':10} | {'R^2':6} | {'R^2 Aj.':8} | {'FLASH EST.':11} |")
+print("-" * 83)
+
+evaluar_modelo(model_RNN, "Simple RNN")
+evaluar_modelo(model_LSTM, "LSTM")
+evaluar_modelo(model_GRU, "GRU")
+
+print("="*83 + "\n")
