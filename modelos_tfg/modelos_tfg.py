@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import os
+import re
 import time
 
 import tensorflow as tf
@@ -13,6 +14,30 @@ from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCh
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# =====================================================================
+# GUARDADO DE VERSIONES DE LAS GRÁFICAS DE VALIDACIÓN Y RESULTADOS
+# =====================================================================
+ruta_base = 'modelos_tfg'
+prefijo = 'entrenamiento_v'
+os.makedirs(ruta_base, exist_ok=True)
+carpetas_existentes = [d for d in os.listdir(ruta_base) if os.path.isdir(os.path.join(ruta_base, d)) and d.startswith(prefijo)]
+
+if not carpetas_existentes:
+    nueva_version = 1
+else:
+    numeros = []
+    for c in carpetas_existentes:
+        try:
+            num = int(re.findall(r'^' + prefijo + r'(\d+)', c)[0])
+            numeros.append(num)
+        except (IndexError, ValueError):
+            continue
+
+    nueva_version = max(numeros) + 1 if numeros else 1
+
+carpeta_salida = os.path.join(ruta_base, f'{prefijo}{nueva_version}')
+os.makedirs(carpeta_salida, exist_ok=True)
 
 # 1. CARGA, PROCESADO Y LIMPIEZA DE DATOS
 try:
@@ -265,13 +290,196 @@ def evaluar_modelo(model, model_name):
     # --- D. IMPRIMIMOS RESULTADOS ---
     print(f"| {model_name:10} | {mae:7.3f} kW | {rmse:7.3f} kW | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
 
+    return predicciones_reales, mae, flash_kb
+
 # 6.3. Imprimimos la tabla de resultados
 print("\n" + "="*83)
 print(f"| {'MODELO':10} | {'MAE':10} | {'RMSE':10} | {'R^2':6} | {'R^2 Aj.':8} | {'FLASH EST.':11} |")
 print("-" * 83)
 
-evaluar_modelo(model_RNN, "Simple RNN")
-evaluar_modelo(model_LSTM, "LSTM")
-evaluar_modelo(model_GRU, "GRU")
+preds_rnn_real, mae_rnn, kb_rnn = evaluar_modelo(model_RNN, "Simple RNN")
+preds_lstm_real, mae_lstm, kb_lstm = evaluar_modelo(model_LSTM, "LSTM")
+preds_gru_real, mae_gru, kb_gru = evaluar_modelo(model_GRU, "GRU")
 
 print("="*83 + "\n")
+
+# 7. Visualizaciones de los resultados de los entrenamientos
+
+# Constantes de colores para las gráficas
+COLOR_REAL = '#000000'
+COLOR_RNN  = '#D32F2F'
+COLOR_LSTM = '#1976D2'
+COLOR_GRU  = '#388E3C'
+
+# =====================================================================
+# GRÁFICA 1: LA CARRERA DEL APRENDIZAJE (Val Loss de los 3 juntos)
+# =====================================================================
+plt.figure(figsize=(10, 6))
+plt.plot(historial_RNN.history['val_loss'], label='Simple RNN', color=COLOR_RNN, linewidth=2.5)
+plt.plot(historial_LSTM.history['val_loss'], label='LSTM', color=COLOR_LSTM, linewidth=2.5)
+plt.plot(historial_GRU.history['val_loss'], label='GRU', color=COLOR_GRU, linewidth=2.5)
+
+plt.title('Evolución del Error de Validación durante el Entrenamiento', fontsize=16, fontweight='bold')
+plt.xlabel('Épocas', fontsize=13)
+plt.ylabel('Loss (MSE)', fontsize=13)
+plt.legend(fontsize=12)
+plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{carpeta_salida}/1_val_loss_unificado.png', dpi=300)
+plt.show()
+
+# =====================================================================
+# GRÁFICA 2: DISPERSIÓN DEL GANADOR
+# =====================================================================
+plt.figure(figsize=(8, 8))
+max_val = np.max(y_val_real) * 1.05
+
+plt.scatter(y_val_real, preds_gru_real, alpha=0.6, color=COLOR_GRU, s=20, label='Predicciones GRU')
+plt.plot([0, max_val], [0, max_val], color=COLOR_REAL, linestyle='--', linewidth=2.5, label='Ideal')
+
+plt.title('Dispersión del Modelo Óptimo (GRU): Real vs. Predicción', fontsize=16, fontweight='bold')
+plt.xlabel('Potencia Real (kW)', fontsize=13)
+plt.ylabel('Potencia Predicha (kW)', fontsize=13)
+plt.xlim(0, max_val)
+plt.ylim(0, max_val)
+plt.legend(fontsize=12)
+plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{carpeta_salida}/2_dispersion_ganador.png', dpi=300)
+plt.show()
+
+# =====================================================================
+# GRÁFICA 3: ZOOM DÍA SOLEADO INDIVIDUAL
+# =====================================================================
+DIA_SOLEADO_INICIO = 5739 #29/11
+DIA_SOLEADO_FIN = 5882 #29/11
+
+plt.figure(figsize=(12, 5))
+plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
+plt.plot(preds_rnn_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
+plt.plot(preds_lstm_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
+plt.plot(preds_gru_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
+
+plt.title('Detalle de Predicción: Día Despejado (Curva de Campana)', fontsize=16, fontweight='bold')
+plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
+plt.ylabel('Potencia (kW)', fontsize=13)
+plt.legend(fontsize=12)
+plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{carpeta_salida}/3_zoom_soleado.png', dpi=300)
+plt.show()
+
+# =====================================================================
+# GRÁFICA 4: ZOOM DÍA NUBLADO INDIVIDUAL
+# =====================================================================
+DIA_NUBLADO_INICIO = 3003 # 10/11
+DIA_NUBLADO_FIN = 3146 # 10/11
+
+plt.figure(figsize=(12, 5))
+plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
+plt.plot(preds_rnn_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
+plt.plot(preds_lstm_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
+plt.plot(preds_gru_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
+
+plt.title('Detalle de Predicción: Día Nublado (Alta Variabilidad)', fontsize=16, fontweight='bold')
+plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
+plt.ylabel('Potencia (kW)', fontsize=13)
+plt.legend(fontsize=12)
+plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{carpeta_salida}/4_zoom_nublado.png', dpi=300)
+plt.show()
+
+# =====================================================================
+# GRÁFICA 5: COMPARATIVA TEMPORAL EN kW (Real vs. Predicciones)
+# =====================================================================
+INICIO = 0
+FIN = 1707
+
+plt.figure(figsize=(16, 6))
+
+# Dibujamos la línea de potencia REAL (más gruesa para que destaque)
+plt.plot(y_val_real[INICIO:FIN], label='Potencia Real Medida', color=COLOR_REAL, linewidth=3.5, zorder=5)
+
+# Dibujamos las predicciones de los modelos
+plt.plot(preds_rnn_real[INICIO:FIN], label='Predicción RNN', color=COLOR_RNN, linewidth=2, linestyle='--', alpha=0.9)
+plt.plot(preds_lstm_real[INICIO:FIN], label='Predicción LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
+plt.plot(preds_gru_real[INICIO:FIN], label='Predicción GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
+
+plt.title('Comparativa de Potencia Generada (20 al 31 de Octubre)', fontsize=16, fontweight='bold')
+plt.xlabel('Pasos de Tiempo (Intervalos de 10 min)', fontsize=13)
+plt.ylabel('Potencia (kW)', fontsize=13)
+
+# Ponemos la leyenda fuera del gráfico si tapa las curvas, o ajustamos su posición
+plt.legend(fontsize=12, loc='upper right', framealpha=0.9)
+plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
+
+# Ajustes para que no se corte nada al guardar
+plt.margins(x=0)
+plt.tight_layout()
+
+# Guardamos la imagen
+plt.savefig(f'{carpeta_salida}/5_comparativa_temporal_kW.png', dpi=300)
+plt.show()
+
+# =====================================================================
+# GRÁFICA 6: BARRAS BI-OBJETIVO (Error MAE vs Tamaño en KB)
+# =====================================================================
+# Empaquetamos los valores que ya calculaste previamente en la tabla
+etiquetas = ['Simple RNN', 'LSTM', 'GRU']
+valores_mae = [mae_rnn, mae_lstm, mae_gru]
+valores_kb = [kb_rnn, kb_lstm, kb_gru]
+
+x = np.arange(len(etiquetas))
+width = 0.35  # Ancho de las barras
+
+# Creamos la figura "A lo grande"
+fig, ax1 = plt.subplots(figsize=(10, 6))
+
+# --- EJE Y IZQUIERDO (MAE) ---
+# Usamos un naranja fuerte y marcamos el borde en negro (ideal para imprimir)
+bar1 = ax1.bar(x - width/2, valores_mae, width, label='Error MAE (kW)', color='#F57C00', edgecolor='black', linewidth=1.5)
+ax1.set_ylabel('Error Promedio (MAE en kW)', fontsize=13, fontweight='bold', color='#F57C00')
+ax1.tick_params(axis='y', labelcolor='#F57C00', labelsize=11)
+ax1.set_xticks(x)
+ax1.set_xticklabels(etiquetas, fontsize=13, fontweight='bold')
+
+# Damos un 15% de espacio extra arriba para que quepan los números sin pisar el borde
+ax1.set_ylim(0, max(valores_mae) * 1.15) 
+
+# --- EJE Y DERECHO (KILOBYTES) ---
+# Clonamos el eje X para crear un segundo eje Y
+ax2 = ax1.twinx()  
+# Usamos un morado/índigo fuerte
+bar2 = ax2.bar(x + width/2, valores_kb, width, label='Tamaño Estimado (KB)', color='#4527A0', edgecolor='black', linewidth=1.5)
+ax2.set_ylabel('Memoria Flash Estimada (KB)', fontsize=13, fontweight='bold', color='#4527A0')
+ax2.tick_params(axis='y', labelcolor='#4527A0', labelsize=11)
+
+# Damos un 15% de espacio extra arriba también aquí
+ax2.set_ylim(0, max(valores_kb) * 1.15)
+
+# --- DETALLES DE FORMATO ---
+plt.title('Comparativa TinyML: Precisión vs. Ligereza de Hardware', fontsize=16, fontweight='bold', pad=15)
+
+# Leyenda unificada colocada arriba en el centro para que no tape las barras
+fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.92), ncol=2, fontsize=12, framealpha=0.9, edgecolor='black')
+
+# ¡EL TRUCO PRO!: Añadir los valores exactos encima de cada barra
+# Esto evita que el tribunal tenga que usar una regla para "adivinar" el valor
+for bar in bar1:
+    yval = bar.get_height()
+    ax1.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_mae)*0.02), 
+             f'{yval:.3f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+for bar in bar2:
+    yval = bar.get_height()
+    ax2.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_kb)*0.02), 
+             f'{yval:.1f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+plt.tight_layout()
+# Bajamos un poco el área del gráfico para hacer hueco a la leyenda superior
+plt.subplots_adjust(top=0.82) 
+
+# Guardamos en alta resolución
+plt.savefig(f'{carpeta_salida}/6_barras_biobjetivo.png', dpi=300)
+plt.show()
