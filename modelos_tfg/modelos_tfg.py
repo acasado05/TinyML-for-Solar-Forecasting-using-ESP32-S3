@@ -60,7 +60,17 @@ data.set_index('Timestamp', inplace=True)
 #2.2. Limpieza del dataset: borrado de columnas
 data.drop(columns=['Gefsaypce', 'EDC', 'EACAC', 'Vmpp_panel'], inplace=True)
 
-# 2.2. Convertimos las horas, días y meses a formato numérico cíclico
+# 2.3. Limpieza del dataset: eliminación de filas con valores atípicos
+filas_pre = len(data)
+data = data[~((data['G_Glob'] > 50) & (data['Pot_inv'] <= 0.01))]
+filas_despues = len(data)
+
+print(f"Filas antes de la limpieza: {filas_pre}")
+print(f"Filas después de la limpieza: {filas_despues}")
+
+print(f" LIMPIEZA DE SENSOR: Se han eliminado {filas_pre - filas_despues} con valores atípicos.")
+
+# 2.4. Convertimos las horas, días y meses a formato numérico cíclico
 horas = data.index.hour
 meses = data.index.month
 
@@ -70,8 +80,8 @@ data['hora_cos'] = np.cos(horas * (2 * np.pi / 24))
 data['mes_sin'] = np.sin(meses * (2 * np.pi / 12))
 data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 
-# 2.3. Seleccionamos las características relevantes para el modelo
-features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_gen', 'Pot_inv'] # COMPLETAR
+# 2.5. Seleccionamos las características relevantes para el modelo
+features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_gen', 'Pot_inv']
 data_selected = data[features]
 
 print(f"------------------------------------------------------------------------")
@@ -86,25 +96,25 @@ print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
 # 2.4. Matriz de correlación
-# corr_matrix = data_selected.corr()
-# plt.figure(figsize=(12, 10))
-# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-# plt.title('Matriz de Correlación')
-# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-# plt.show()
+corr_matrix = data_selected.corr()
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+plt.title('Matriz de Correlación')
+plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 # 2.5. Gráfica de la irradiancia global a lo largo del tiempo
-# plt.figure(figsize=(12, 5))
-# plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
-# plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
-# plt.xlabel('Fecha', fontsize=12)
-# plt.ylabel('Irradiancia (W/m²)', fontsize=12)
-# plt.legend(loc='upper right')
-# plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
-# plt.gcf().autofmt_xdate() 
-# plt.tight_layout()
-# plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
-# plt.show()
+plt.figure(figsize=(12, 5))
+plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+plt.xlabel('Fecha', fontsize=12)
+plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+plt.legend(loc='upper right')
+plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+plt.gcf().autofmt_xdate() 
+plt.tight_layout()
+plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
+plt.show()
 
 # 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
 
@@ -122,7 +132,7 @@ transformed_train = scaler.fit_transform(train_df)
 transformed_val = scaler.transform(val_df)
 
 # 3.3. Función para crear secuencias de datos para el modelo
-def create_multivariate_sequences(X, y, seq_length, look_ahead):
+def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
     """
     Transforma series temporales planas en ventanas deslizantes tridimensionales 
     para el entrenamiento de Redes Neuronales Recurrentes (RNN, LSTM, GRU).
@@ -154,27 +164,43 @@ def create_multivariate_sequences(X, y, seq_length, look_ahead):
     """
     Xs, ys = [], []
 
-    # El bucle termina antes para evitar predecir un dato a futuro que no existe.
+    # El bucle termina antes para evitar salirnos del límite
     limite = len(X) - seq_length - look_ahead + 1
+
+    # Calculamos el tiempo exacto que DEBE haber si no hay saltos (en minutos)
+    # Ejemplo: (18 + 6 - 1) * 10 min = 230 minutos exactos
+    minutos_esperados = 10 * (seq_length + look_ahead - 1)
+    tiempo_esperado = pd.Timedelta(minutes=minutos_esperados)
+
+    saltos_ignorados = 0
 
     for i in range(limite):
         
-        # Extraemos la ventana de datos históricos para la secuencia actual
-        ventana_X = X[i:(i + seq_length)]
+        # Miramos la fecha de inicio de la ventana y la fecha del objetivo
+        tiempo_inicio = timestamps[i]
+        tiempo_fin = timestamps[i + seq_length + look_ahead - 1]
+        
+        # Calculamos cuánto tiempo ha pasado realmente
+        tiempo_real = tiempo_fin - tiempo_inicio
 
-        # Apuntamos al objetivo futuro. Si la ventana termina en i + sequence_length - 1,
-        # el objetivo está a 'look_ahead' pasos más allá.
-        objetivo_y = y[i + seq_length + look_ahead - 1]
+        # Solo guardamos la secuencia si el tiempo es EXACTO (no faltan filas en medio)
+        if tiempo_real == tiempo_esperado:
+            ventana_X = X[i:(i + seq_length)]
+            objetivo_y = y[i + seq_length + look_ahead - 1]
 
-        Xs.append(ventana_X)
-        ys.append(objetivo_y)
+            Xs.append(ventana_X)
+            ys.append(objetivo_y)
+        else:
+            saltos_ignorados += 1
+
+    print(f"   -> Secuencias creadas: {len(Xs)} (Se ignoraron {saltos_ignorados} secuencias por saltos temporales)")
 
     return np.array(Xs), np.array(ys)
 
 sequence_length = 18 # Ventana de 3 horas
 look_ahead = 6       # Predecir 1 hora en el futuro
-X_train, y_train = create_multivariate_sequences(transformed_train, transformed_train[:, -1], sequence_length, look_ahead)
-X_val, y_val = create_multivariate_sequences(transformed_val, transformed_val[:, -1], sequence_length, look_ahead)
+X_train, y_train = create_multivariate_sequences(transformed_train, transformed_train[:, -1], train_df.index,sequence_length, look_ahead)
+X_val, y_val = create_multivariate_sequences(transformed_val, transformed_val[:, -1], val_df.index, sequence_length, look_ahead)
 
 # Las GRU esperan una entrada de forma (samples, timesteps, features)
 print(f"FORMA DE X: {X_train.shape}")  # (n_samples, sequence_length, n_features)
