@@ -61,14 +61,10 @@ data.set_index('Timestamp', inplace=True)
 data.drop(columns=['Gefsaypce', 'EDC', 'EACAC', 'Vmpp_panel'], inplace=True)
 
 # 2.3. Limpieza del dataset: eliminación de filas con valores atípicos
-filas_pre = len(data)
-data = data[~((data['G_Glob'] > 50) & (data['Pot_inv'] <= 0.01))]
-filas_despues = len(data)
+fecha_inicio = '15/03/2025 00:00'
+fecha_fin    = '30/09/2025 23:50' 
 
-print(f"Filas antes de la limpieza: {filas_pre}")
-print(f"Filas después de la limpieza: {filas_despues}")
-
-print(f" LIMPIEZA DE SENSOR: Se han eliminado {filas_pre - filas_despues} con valores atípicos.")
+data = data.loc[fecha_inicio:fecha_fin]
 
 # 2.4. Convertimos las horas, días y meses a formato numérico cíclico
 horas = data.index.hour
@@ -95,26 +91,26 @@ print(f"------------------------------------------------------------------------
 print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
-# 2.4. Matriz de correlación
-corr_matrix = data_selected.corr()
-plt.figure(figsize=(12, 10))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-plt.title('Matriz de Correlación')
-plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-plt.show()
+# # 2.4. Matriz de correlación
+# corr_matrix = data_selected.corr()
+# plt.figure(figsize=(12, 10))
+# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+# plt.title('Matriz de Correlación')
+# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
-# 2.5. Gráfica de la irradiancia global a lo largo del tiempo
-plt.figure(figsize=(12, 5))
-plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
-plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
-plt.xlabel('Fecha', fontsize=12)
-plt.ylabel('Irradiancia (W/m²)', fontsize=12)
-plt.legend(loc='upper right')
-plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
-plt.gcf().autofmt_xdate() 
-plt.tight_layout()
-plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
-plt.show()
+# # 2.5. Gráfica de la irradiancia global a lo largo del tiempo
+# plt.figure(figsize=(12, 5))
+# plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+# plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+# plt.xlabel('Fecha', fontsize=12)
+# plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+# plt.legend(loc='upper right')
+# plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+# plt.gcf().autofmt_xdate() 
+# plt.tight_layout()
+# plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
+# plt.show()
 
 # 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
 
@@ -221,7 +217,7 @@ def create_model(model_type, input_shape):
     model = Sequential([
         Input(shape=input_shape),
         capa_recurrente,
-        Dropout(0.2),
+        Dropout(0.3),
         Dense(32, activation='relu'),
         Dense(16, activation='relu'),
         Dense(8, activation='relu'),
@@ -247,11 +243,11 @@ model_GRU = create_model('GRU', forma_entrada)
 model_GRU.summary()
 
 
-early_stopping = EarlyStopping(monitor='val_loss', patience=8, restore_best_weights=True, verbose=1)
+early_stopping = EarlyStopping(monitor='val_loss', patience=12, restore_best_weights=True, verbose=1)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4 , min_lr=1e-6, verbose=1)
 
 n_epochs = 100
-batch_size = 32
+batch_size = 64
 
 def model_training(model, model_name):
 
@@ -314,7 +310,7 @@ def evaluar_modelo(model, model_name):
     flash_kb = (total_params * 4) / 1024
     
     # --- D. IMPRIMIMOS RESULTADOS ---
-    print(f"| {model_name:10} | {mae:7.3f} kW | {rmse:7.3f} kW | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
+    print(f"| {model_name:10} | {mae:7.3f} W | {rmse:7.3f} W | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
 
     return predicciones_reales, mae, flash_kb
 
@@ -355,6 +351,40 @@ plt.savefig(f'{carpeta_salida}/1_val_loss_unificado.png', dpi=300)
 plt.show()
 
 # =====================================================================
+# GRÁFICA 1B: SALUD DEL MODELO (Train vs Validation Loss)
+# =====================================================================
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig.suptitle('Diagnóstico de Entrenamiento: Pérdida (Train) vs Validación (Val)', fontsize=16, fontweight='bold')
+
+# Historiales y nombres para iterar fácilmente
+historiales = [historial_RNN, historial_LSTM, historial_GRU]
+nombres = ['Simple RNN', 'LSTM', 'GRU']
+colores = [COLOR_RNN, COLOR_LSTM, COLOR_GRU]
+
+for i in range(3):
+    ax = axes[i]
+    # Extraemos los datos de la memoria del entrenamiento
+    loss = historiales[i].history['loss']
+    val_loss = historiales[i].history['val_loss']
+    epocas = range(len(loss))
+    
+    # Dibujamos Entrenamiento (línea normal) y Validación (línea gruesa del color del modelo)
+    ax.plot(epocas, loss, label='Training Loss', color='gray', linestyle='--', linewidth=2)
+    ax.plot(epocas, val_loss, label='Validation Loss', color=colores[i], linewidth=2.5)
+    
+    ax.set_title(f'Modelo: {nombres[i]}', fontsize=14)
+    ax.set_xlabel('Épocas', fontsize=12)
+    ax.set_ylabel('Loss (MSE)', fontsize=12)
+    ax.legend(fontsize=11)
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+plt.tight_layout()
+# Ajustamos un poco para que el título principal no pise las gráficas
+plt.subplots_adjust(top=0.88) 
+plt.savefig(f'{carpeta_salida}/1b_diagnostico_train_val.png', dpi=300)
+plt.show()
+
+# =====================================================================
 # GRÁFICA 2: DISPERSIÓN DEL GANADOR
 # =====================================================================
 plt.figure(figsize=(8, 8))
@@ -364,8 +394,8 @@ plt.scatter(y_val_real, preds_gru_real, alpha=0.6, color=COLOR_GRU, s=20, label=
 plt.plot([0, max_val], [0, max_val], color=COLOR_REAL, linestyle='--', linewidth=2.5, label='Ideal')
 
 plt.title('Dispersión del Modelo Óptimo (GRU): Real vs. Predicción', fontsize=16, fontweight='bold')
-plt.xlabel('Potencia Real (kW)', fontsize=13)
-plt.ylabel('Potencia Predicha (kW)', fontsize=13)
+plt.xlabel('Potencia Real (W)', fontsize=13)
+plt.ylabel('Potencia Predicha (W)', fontsize=13)
 plt.xlim(0, max_val)
 plt.ylim(0, max_val)
 plt.legend(fontsize=12)
@@ -377,8 +407,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 3: ZOOM DÍA SOLEADO INDIVIDUAL
 # =====================================================================
-DIA_SOLEADO_INICIO = 5739 #29/11
-DIA_SOLEADO_FIN = 5882 #29/11
+DIA_SOLEADO_INICIO = 560
+DIA_SOLEADO_FIN = 710
 
 plt.figure(figsize=(12, 5))
 plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
@@ -388,7 +418,7 @@ plt.plot(preds_gru_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='GRU', color=
 
 plt.title('Detalle de Predicción: Día Despejado (Curva de Campana)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
-plt.ylabel('Potencia (kW)', fontsize=13)
+plt.ylabel('Potencia (W)', fontsize=13)
 plt.legend(fontsize=12)
 plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
 plt.tight_layout()
@@ -398,8 +428,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 4: ZOOM DÍA NUBLADO INDIVIDUAL
 # =====================================================================
-DIA_NUBLADO_INICIO = 3003 # 10/11
-DIA_NUBLADO_FIN = 3146 # 10/11
+DIA_NUBLADO_INICIO = 3430
+DIA_NUBLADO_FIN = 3580
 
 plt.figure(figsize=(12, 5))
 plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
@@ -409,7 +439,7 @@ plt.plot(preds_gru_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='GRU', color=
 
 plt.title('Detalle de Predicción: Día Nublado (Alta Variabilidad)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
-plt.ylabel('Potencia (kW)', fontsize=13)
+plt.ylabel('Potencia (W)', fontsize=13)
 plt.legend(fontsize=12)
 plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
 plt.tight_layout()
@@ -419,8 +449,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 5: COMPARATIVA TEMPORAL EN kW (Real vs. Predicciones)
 # =====================================================================
-INICIO = 0
-FIN = 1707
+INICIO = 1420
+FIN = 2440
 
 plt.figure(figsize=(16, 6))
 
@@ -432,9 +462,9 @@ plt.plot(preds_rnn_real[INICIO:FIN], label='Predicción RNN', color=COLOR_RNN, l
 plt.plot(preds_lstm_real[INICIO:FIN], label='Predicción LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
 plt.plot(preds_gru_real[INICIO:FIN], label='Predicción GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
 
-plt.title('Comparativa de Potencia Generada (20 al 31 de Octubre)', fontsize=16, fontweight='bold')
+plt.title('Comparativa de Potencia Generada (1 al 7 de Septiembre)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (Intervalos de 10 min)', fontsize=13)
-plt.ylabel('Potencia (kW)', fontsize=13)
+plt.ylabel('Potencia (W)', fontsize=13)
 
 # Ponemos la leyenda fuera del gráfico si tapa las curvas, o ajustamos su posición
 plt.legend(fontsize=12, loc='upper right', framealpha=0.9)
@@ -465,7 +495,7 @@ fig, ax1 = plt.subplots(figsize=(10, 6))
 # --- EJE Y IZQUIERDO (MAE) ---
 # Usamos un naranja fuerte y marcamos el borde en negro (ideal para imprimir)
 bar1 = ax1.bar(x - width/2, valores_mae, width, label='Error MAE (kW)', color='#F57C00', edgecolor='black', linewidth=1.5)
-ax1.set_ylabel('Error Promedio (MAE en kW)', fontsize=13, fontweight='bold', color='#F57C00')
+ax1.set_ylabel('Error Promedio (MAE en W)', fontsize=13, fontweight='bold', color='#F57C00')
 ax1.tick_params(axis='y', labelcolor='#F57C00', labelsize=11)
 ax1.set_xticks(x)
 ax1.set_xticklabels(etiquetas, fontsize=13, fontweight='bold')
