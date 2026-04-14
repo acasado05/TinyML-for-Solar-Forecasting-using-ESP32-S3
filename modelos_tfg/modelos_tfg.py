@@ -60,13 +60,7 @@ data.set_index('Timestamp', inplace=True)
 #2.2. Limpieza del dataset: borrado de columnas
 data.drop(columns=['Gefsaypce', 'EDC', 'EACAC', 'Vmpp_panel'], inplace=True)
 
-# 2.3. Limpieza del dataset: eliminación de filas con valores atípicos
-fecha_inicio = '15/03/2025 00:00'
-fecha_fin    = '30/09/2025 23:50' 
-
-data = data.loc[fecha_inicio:fecha_fin]
-
-# 2.4. Convertimos las horas, días y meses a formato numérico cíclico
+# 2.3. Convertimos las horas, días y meses a formato numérico cíclico
 horas = data.index.hour
 meses = data.index.month
 
@@ -76,7 +70,7 @@ data['hora_cos'] = np.cos(horas * (2 * np.pi / 24))
 data['mes_sin'] = np.sin(meses * (2 * np.pi / 12))
 data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 
-# 2.5. Seleccionamos las características relevantes para el modelo
+# 2.4. Seleccionamos las características relevantes para el modelo
 features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_gen', 'Pot_inv']
 data_selected = data[features]
 
@@ -91,26 +85,26 @@ print(f"------------------------------------------------------------------------
 print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
-# # 2.4. Matriz de correlación
-# corr_matrix = data_selected.corr()
-# plt.figure(figsize=(12, 10))
-# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-# plt.title('Matriz de Correlación')
-# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-# plt.show()
+# 2.5. Matriz de correlación
+corr_matrix = data_selected.corr()
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+plt.title('Matriz de Correlación')
+plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+plt.show()
 
-# # 2.5. Gráfica de la irradiancia global a lo largo del tiempo
-# plt.figure(figsize=(12, 5))
-# plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
-# plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
-# plt.xlabel('Fecha', fontsize=12)
-# plt.ylabel('Irradiancia (W/m²)', fontsize=12)
-# plt.legend(loc='upper right')
-# plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
-# plt.gcf().autofmt_xdate() 
-# plt.tight_layout()
-# plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
-# plt.show()
+# 2.6. Gráfica de la irradiancia global a lo largo del tiempo
+plt.figure(figsize=(12, 5))
+plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+plt.xlabel('Fecha', fontsize=12)
+plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+plt.legend(loc='upper right')
+plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+plt.gcf().autofmt_xdate() 
+plt.tight_layout()
+plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
+plt.show()
 
 # 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
 
@@ -407,8 +401,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 3: ZOOM DÍA SOLEADO INDIVIDUAL
 # =====================================================================
-DIA_SOLEADO_INICIO = 560
-DIA_SOLEADO_FIN = 710
+DIA_SOLEADO_INICIO = 2000
+DIA_SOLEADO_FIN = 2150
 
 plt.figure(figsize=(12, 5))
 plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
@@ -428,8 +422,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 4: ZOOM DÍA NUBLADO INDIVIDUAL
 # =====================================================================
-DIA_NUBLADO_INICIO = 3430
-DIA_NUBLADO_FIN = 3580
+DIA_NUBLADO_INICIO = 4170
+DIA_NUBLADO_FIN = 4320
 
 plt.figure(figsize=(12, 5))
 plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
@@ -449,8 +443,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 5: COMPARATIVA TEMPORAL EN kW (Real vs. Predicciones)
 # =====================================================================
-INICIO = 1420
-FIN = 2440
+INICIO = 280
+FIN = 1300
 
 plt.figure(figsize=(16, 6))
 
@@ -462,7 +456,7 @@ plt.plot(preds_rnn_real[INICIO:FIN], label='Predicción RNN', color=COLOR_RNN, l
 plt.plot(preds_lstm_real[INICIO:FIN], label='Predicción LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
 plt.plot(preds_gru_real[INICIO:FIN], label='Predicción GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
 
-plt.title('Comparativa de Potencia Generada (1 al 7 de Septiembre)', fontsize=16, fontweight='bold')
+plt.title('Comparativa de Potencia Generada (Finales Octubre)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (Intervalos de 10 min)', fontsize=13)
 plt.ylabel('Potencia (W)', fontsize=13)
 
@@ -517,8 +511,6 @@ ax2.set_ylim(0, max(valores_kb) * 1.15)
 # --- DETALLES DE FORMATO ---
 plt.title('Comparativa TinyML: Precisión vs. Ligereza de Hardware', fontsize=16, fontweight='bold', pad=15)
 
-# Leyenda unificada colocada arriba en el centro para que no tape las barras
-fig.legend(loc="upper center", bbox_to_anchor=(0.5, 0.92), ncol=2, fontsize=12, framealpha=0.9, edgecolor='black')
 
 # ¡EL TRUCO PRO!: Añadir los valores exactos encima de cada barra
 # Esto evita que el tribunal tenga que usar una regla para "adivinar" el valor
