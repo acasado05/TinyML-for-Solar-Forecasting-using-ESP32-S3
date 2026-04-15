@@ -72,7 +72,7 @@ data['mes_sin'] = np.sin(meses * (2 * np.pi / 12))
 data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 
 # 2.4. Seleccionamos las características relevantes para el modelo
-features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_gen', 'Pot_inv']
+features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_inv'] # Quito Pot_Gen
 data_selected = data[features]
 
 print(f"------------------------------------------------------------------------")
@@ -86,13 +86,13 @@ print(f"------------------------------------------------------------------------
 print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
-# # 2.5. Matriz de correlación
-# corr_matrix = data_selected.corr()
-# plt.figure(figsize=(12, 10))
-# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-# plt.title('Matriz de Correlación')
-# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-# plt.show()
+# 2.5. Matriz de correlación
+corr_matrix = data_selected.corr()
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+plt.title('Matriz de Correlación')
+plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 # # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
 # plt.figure(figsize=(12, 5))
@@ -199,7 +199,7 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
 
     return np.array(Xs), np.array(ys)
 
-sequence_length = 30 # Ventana de 5 horas
+sequence_length = 18  # Ventana de 2 horas
 look_ahead = 6       # Predecir 1 hora en el futuro
 X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
 X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
@@ -225,14 +225,14 @@ def create_model(model_type, input_shape):
     elif model_type == 'LSTM':
         model = Sequential([
             Input(shape=input_shape),
-            LSTM(32, activation='tanh', return_sequences=True),
-            Dropout(0.1),
-            LSTM(16, activation='tanh', return_sequences=False),
+            LSTM(32, activation='tanh', return_sequences=False),
+            # Dropout(0.1),
+            # LSTM(16, activation='tanh', return_sequences=False),
             Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
-        optimizer = keras.optimizers.Adam(learning_rate=0.0005)
+        optimizer = keras.optimizers.Adam(learning_rate=0.001)
 
     elif model_type == 'GRU':
         model = Sequential([
