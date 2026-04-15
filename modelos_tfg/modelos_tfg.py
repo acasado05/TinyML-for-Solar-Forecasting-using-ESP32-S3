@@ -117,9 +117,20 @@ print(f"Entrenamiento (80%): {len(train_df)} filas")
 print(f"Validación (20%): {len(val_df)} filas")
 
 # 3.2. Normalización de los datos utilizando MinMaxScaler
-scaler = MinMaxScaler()
-transformed_train = scaler.fit_transform(train_df)
-transformed_val = scaler.transform(val_df)
+scaler_X = MinMaxScaler()
+scaler_y = MinMaxScaler()
+
+# Separamos las variables predictoras (X) de la variable objetivo (y)
+train_X_df = train_df.drop(columns=['Pot_inv'])
+val_X_df = val_df.drop(columns=['Pot_inv'])
+
+# Escalamos X (Todas las columnas menos Pot_inv)
+transformed_train_X = scaler_X.fit_transform(train_X_df)
+transformed_val_X = scaler_X.transform(val_X_df)
+
+# Escalamos y (Solo Pot_inv)
+transformed_train_y = scaler_y.fit_transform(train_df[['Pot_inv']])
+transformed_val_y = scaler_y.transform(val_df[['Pot_inv']])
 
 # 3.3. Función para crear secuencias de datos para el modelo
 def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
@@ -189,8 +200,8 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
 
 sequence_length = 18 # Ventana de 3 horas
 look_ahead = 6       # Predecir 1 hora en el futuro
-X_train, y_train = create_multivariate_sequences(transformed_train, transformed_train[:, -1], train_df.index,sequence_length, look_ahead)
-X_val, y_val = create_multivariate_sequences(transformed_val, transformed_val[:, -1], val_df.index, sequence_length, look_ahead)
+X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
+X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
 
 # Las GRU esperan una entrada de forma (samples, timesteps, features)
 print(f"FORMA DE X: {X_train.shape}")  # (n_samples, sequence_length, n_features)
@@ -201,25 +212,36 @@ def create_model(model_type, input_shape):
     
     # 1. Elegimos la capa recurrente según lo que pida la función
     if model_type == 'RNN':
-        capa_recurrente = SimpleRNN(64, activation='tanh', return_sequences=False)
+        model = Sequential([
+            Input(shape=input_shape),
+            SimpleRNN(64, activation='tanh', return_sequences=False),
+            Dropout(0.2),
+            Dense(16, activation='relu'),
+            Dense(1, activation='relu')
+        ])
     elif model_type == 'LSTM':
-        capa_recurrente = LSTM(64, activation='tanh', return_sequences=False)
+        model = Sequential([
+            Input(shape=input_shape),
+            LSTM(32, activation='tanh', return_sequences=True),
+            Dropout(0.1),
+            LSTM(16, activation='tanh', return_sequences=False),
+            Dropout(0.1),
+            Dense(16, activation='relu'),
+            Dense(1, activation='relu')
+        ])
     elif model_type == 'GRU':
-        capa_recurrente = GRU(64, activation='tanh', return_sequences=False)
-    
-    # 2. Construimos el modelo
-    model = Sequential([
-        Input(shape=input_shape),
-        capa_recurrente,
-        Dropout(0.3),
-        Dense(32, activation='relu'),
-        Dense(16, activation='relu'),
-        Dense(8, activation='relu'),
-        Dense(1)
-    ])
+        model = Sequential([
+            Input(shape=input_shape),
+            GRU(32, activation='tanh', return_sequences=True),
+            Dropout(0.1),
+            GRU(16, activation='tanh', return_sequences=False),
+            Dropout(0.1),
+            Dense(16, activation='relu'),
+            Dense(1, activation='relu')
+        ])
 
-    # 3. Compilamos el modelo
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    # 2. Compilamos el modelo
+    optimizer = keras.optimizers.Adam(learning_rate=0.0005)
     model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
 
     return model
@@ -237,8 +259,8 @@ model_GRU = create_model('GRU', forma_entrada)
 model_GRU.summary()
 
 
-early_stopping = EarlyStopping(monitor='val_loss', patience=12, restore_best_weights=True, verbose=1)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=4 , min_lr=1e-6, verbose=1)
+early_stopping = EarlyStopping(monitor='val_loss', patience=50, restore_best_weights=True, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7 , min_lr=1e-6, verbose=1)
 
 n_epochs = 100
 batch_size = 64
@@ -275,22 +297,15 @@ print(f"\n ¡ENTRENAMIENTO COMPLETADO! LOS MODELOS HAN SIDO ENTRENADOS EXITOSAME
 print(f"\nEVALUANDO LOS MODELOS EN EL CONJUNTO DE VALIDACIÓN...")
 
 # 6.1. Recuperamos los valores reales de potencia (Desescalar y_val)
-# Creamos una matriz falsa de ceros con las 12 columnas originales
-num_columnas = X_train.shape[2]
-dummy_y = np.zeros((len(y_val), num_columnas))
-# Metemos y_val en la última columna de la matriz dummy
-dummy_y[:, -1] = y_val
-# Aplicamos la inversa de la transformación para recuperar los valores reales
-y_val_real = scaler.inverse_transform(dummy_y)[:, -1]
+y_val_real = scaler_y.inverse_transform(y_val.reshape(-1, 1)).flatten()
 
 # 6.2. Función para evaluar cada modelo y calcular métricas
 def evaluar_modelo(model, model_name):
     # --- A. PREDICCIÓN Y DESESCALADO ---
     predicciones = model.predict(X_val, verbose=0)
     
-    dummy_pred = np.zeros((len(predicciones), num_columnas))
-    dummy_pred[:, -1] = predicciones.flatten()
-    predicciones_reales = scaler.inverse_transform(dummy_pred)[:, -1]
+    # Inversa directa limpia
+    predicciones_reales = scaler_y.inverse_transform(predicciones).flatten()
     
     # --- B. MÉTRICAS MATEMÁTICAS ---
     rmse = np.sqrt(mean_squared_error(y_val_real, predicciones_reales))
@@ -306,16 +321,16 @@ def evaluar_modelo(model, model_name):
     # --- D. IMPRIMIMOS RESULTADOS ---
     print(f"| {model_name:10} | {mae:7.3f} W | {rmse:7.3f} W | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
 
-    return predicciones_reales, mae, flash_kb
+    return predicciones_reales, mae, r2, flash_kb
 
 # 6.3. Imprimimos la tabla de resultados
 print("\n" + "="*83)
 print(f"| {'MODELO':10} | {'MAE':10} | {'RMSE':10} | {'R^2':6} | {'R^2 Aj.':8} | {'FLASH EST.':11} |")
 print("-" * 83)
 
-preds_rnn_real, mae_rnn, kb_rnn = evaluar_modelo(model_RNN, "Simple RNN")
-preds_lstm_real, mae_lstm, kb_lstm = evaluar_modelo(model_LSTM, "LSTM")
-preds_gru_real, mae_gru, kb_gru = evaluar_modelo(model_GRU, "GRU")
+preds_rnn_real, mae_rnn, r2_rnn, kb_rnn = evaluar_modelo(model_RNN, "Simple RNN")
+preds_lstm_real, mae_lstm, r2_lstm, kb_lstm = evaluar_modelo(model_LSTM, "LSTM")
+preds_gru_real, mae_gru, r2_gru, kb_gru = evaluar_modelo(model_GRU, "GRU")
 
 print("="*83 + "\n")
 
@@ -381,13 +396,32 @@ plt.show()
 # =====================================================================
 # GRÁFICA 2: DISPERSIÓN DEL GANADOR
 # =====================================================================
+# 1. Empaquetamos la información de los modelos en un diccionario
+modelos_info = {
+    'Simple RNN': {'preds': preds_rnn_real, 'r2': r2_rnn, 'color': COLOR_RNN},
+    'LSTM':       {'preds': preds_lstm_real, 'r2': r2_lstm, 'color': COLOR_LSTM},
+    'GRU':        {'preds': preds_gru_real,  'r2': r2_gru,  'color': COLOR_GRU}
+}
+
+# 2. Buscamos el modelo con el R^2 más alto
+mejor_nombre = max(modelos_info, key=lambda k: modelos_info[k]['r2'])
+mejor_preds  = modelos_info[mejor_nombre]['preds']
+mejor_color  = modelos_info[mejor_nombre]['color']
+mejor_r2     = modelos_info[mejor_nombre]['r2']
+
+print(f"\n Modelo seleccionado para la Gráfica de Dispersión: {mejor_nombre} (R^2 = {mejor_r2:.4f})")
+
+# 3. Gráfica de dispersión del modelo ganador
 plt.figure(figsize=(8, 8))
 max_val = np.max(y_val_real) * 1.05
 
-plt.scatter(y_val_real, preds_gru_real, alpha=0.6, color=COLOR_GRU, s=20, label='Predicciones GRU')
+plt.figure(figsize=(8, 8))
+max_val = np.max(y_val_real) * 1.05
+
+plt.scatter(y_val_real, mejor_preds, alpha=0.6, color=mejor_color, s=20, label=f'Predicciones {mejor_nombre}')
 plt.plot([0, max_val], [0, max_val], color=COLOR_REAL, linestyle='--', linewidth=2.5, label='Ideal')
 
-plt.title('Dispersión del Modelo Óptimo (GRU): Real vs. Predicción', fontsize=16, fontweight='bold')
+plt.title(f'Dispersión del Modelo Óptimo ({mejor_nombre}): Real vs. Predicción', fontsize=16, fontweight='bold')
 plt.xlabel('Potencia Real (W)', fontsize=13)
 plt.ylabel('Potencia Predicha (W)', fontsize=13)
 plt.xlim(0, max_val)
@@ -401,8 +435,8 @@ plt.show()
 # =====================================================================
 # GRÁFICA 3: ZOOM DÍA SOLEADO INDIVIDUAL
 # =====================================================================
-DIA_SOLEADO_INICIO = 2000
-DIA_SOLEADO_FIN = 2150
+DIA_SOLEADO_INICIO = 0
+DIA_SOLEADO_FIN = 144
 
 plt.figure(figsize=(12, 5))
 plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
