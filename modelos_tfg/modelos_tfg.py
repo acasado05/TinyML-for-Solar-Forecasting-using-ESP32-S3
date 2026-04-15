@@ -7,9 +7,10 @@ import time
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras.layers import Input, SimpleRNN, LSTM,GRU, Dense, Dropout
-from tensorflow.keras.models import Model, Sequential
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from keras.layers import Input, SimpleRNN, LSTM,GRU, Dense, Dropout
+from keras.models import Model, Sequential
+from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
+from keras import backend as K
 
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
@@ -85,26 +86,26 @@ print(f"------------------------------------------------------------------------
 print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
-# 2.5. Matriz de correlación
-corr_matrix = data_selected.corr()
-plt.figure(figsize=(12, 10))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-plt.title('Matriz de Correlación')
-plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-plt.show()
+# # 2.5. Matriz de correlación
+# corr_matrix = data_selected.corr()
+# plt.figure(figsize=(12, 10))
+# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+# plt.title('Matriz de Correlación')
+# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
-# 2.6. Gráfica de la irradiancia global a lo largo del tiempo
-plt.figure(figsize=(12, 5))
-plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
-plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
-plt.xlabel('Fecha', fontsize=12)
-plt.ylabel('Irradiancia (W/m²)', fontsize=12)
-plt.legend(loc='upper right')
-plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
-plt.gcf().autofmt_xdate() 
-plt.tight_layout()
-plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
-plt.show()
+# # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
+# plt.figure(figsize=(12, 5))
+# plt.plot(data_selected.index, data_selected['G_Glob'], color='orange', alpha=0.5, label='Irradiancia 10 min')
+# plt.title('Distribución Anual de la Irradiancia Global (G_Glob)', fontsize=16)
+# plt.xlabel('Fecha', fontsize=12)
+# plt.ylabel('Irradiancia (W/m²)', fontsize=12)
+# plt.legend(loc='upper right')
+# plt.grid(True, which='major', linestyle='-', linewidth=1.2, color='black', alpha=0.3)
+# plt.gcf().autofmt_xdate() 
+# plt.tight_layout()
+# plt.savefig('modelos_tfg/irradiancia_anual.png', dpi=300) # Guardar en alta calidad para el TFG
+# plt.show()
 
 # 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
 
@@ -198,7 +199,7 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
 
     return np.array(Xs), np.array(ys)
 
-sequence_length = 18 # Ventana de 3 horas
+sequence_length = 30 # Ventana de 5 horas
 look_ahead = 6       # Predecir 1 hora en el futuro
 X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
 X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
@@ -219,6 +220,8 @@ def create_model(model_type, input_shape):
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
+        optimizer = keras.optimizers.Adam(learning_rate=0.001)
+
     elif model_type == 'LSTM':
         model = Sequential([
             Input(shape=input_shape),
@@ -229,6 +232,8 @@ def create_model(model_type, input_shape):
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
+        optimizer = keras.optimizers.Adam(learning_rate=0.0005)
+
     elif model_type == 'GRU':
         model = Sequential([
             Input(shape=input_shape),
@@ -239,9 +244,10 @@ def create_model(model_type, input_shape):
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
+        optimizer = keras.optimizers.Adam(learning_rate=0.0005)
 
     # 2. Compilamos el modelo
-    optimizer = keras.optimizers.Adam(learning_rate=0.0005)
+    
     model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
 
     return model
@@ -250,6 +256,8 @@ def create_model(model_type, input_shape):
 # CREACIÓN DE LOS TRES MODELOS DE RNN (RNN, LSTM, GRU)
 # ====================================================
 forma_entrada = (sequence_length, X_train.shape[2])  # (18, n_features)
+
+K.clear_session()  # Limpiamos la sesión para evitar conflictos con modelos anteriores
 
 print(f"CONSTRUYENDO ARQUITECTURAS DE LOS MODELOS...")
 model_RNN = create_model('RNN', forma_entrada)
@@ -269,13 +277,24 @@ def model_training(model, model_name):
 
     print(f"\nINICIANDO ENTRENAMIENTO DEL MODELO {model_name}...")
 
+    nombre_archivo = f"{model_name.replace(' ', '_')}_mejor.h5"
+    ruta_guardado = f"{carpeta_salida}/{nombre_archivo}"
+
+    checkpoint = ModelCheckpoint(
+        filepath=ruta_guardado, 
+        monitor='val_loss', 
+        save_best_only=True,   # Solo guarda el mejor, no guarda épocas malas
+        save_weights_only=False, # Guarda el modelo completo (arquitectura + pesos)
+        verbose=1
+    )
+
     tiempo_inicio = time.time()
 
     history = model.fit(X_train, y_train,
                         epochs=n_epochs,
                         batch_size=batch_size,
                         validation_data=(X_val, y_val),
-                        callbacks=[early_stopping, reduce_lr],
+                        callbacks=[early_stopping, reduce_lr, checkpoint],
                         verbose=1)
     
     tiempo_fin = time.time()
