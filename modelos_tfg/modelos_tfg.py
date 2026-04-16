@@ -199,8 +199,8 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
 
     return np.array(Xs), np.array(ys)
 
-sequence_length = 18  # Ventana de 2 horas
-look_ahead = 6       # Predecir 1 hora en el futuro
+sequence_length = 240  # Ventana de 1 dia
+look_ahead = 6         # Predecir 1 hora en el futuro
 X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
 X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
 
