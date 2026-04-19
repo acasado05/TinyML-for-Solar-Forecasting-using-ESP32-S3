@@ -7,7 +7,7 @@ import time
 
 import tensorflow as tf
 from tensorflow import keras
-from keras.layers import Input, SimpleRNN, LSTM,GRU, Dense, Dropout
+from keras.layers import Input, SimpleRNN, LSTM,GRU, Dense, Dropout, Conv1D, MaxPooling1D, Flatten
 from keras.models import Model, Sequential
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from keras import backend as K
@@ -87,12 +87,12 @@ print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
 # 2.5. Matriz de correlación
-corr_matrix = data_selected.corr()
-plt.figure(figsize=(12, 10))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-plt.title('Matriz de Correlación')
-plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-plt.show()
+# corr_matrix = data_selected.corr()
+# plt.figure(figsize=(12, 10))
+# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+# plt.title('Matriz de Correlación')
+# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
 # # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
 # plt.figure(figsize=(12, 5))
@@ -199,7 +199,7 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
 
     return np.array(Xs), np.array(ys)
 
-sequence_length = 240  # Ventana de 1 dia
+sequence_length = 30   # 2 horas
 look_ahead = 6         # Predecir 1 hora en el futuro
 X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
 X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
@@ -216,7 +216,7 @@ def create_model(model_type, input_shape):
         model = Sequential([
             Input(shape=input_shape),
             SimpleRNN(64, activation='tanh', return_sequences=False),
-            Dropout(0.2),
+            Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
@@ -225,7 +225,7 @@ def create_model(model_type, input_shape):
     elif model_type == 'LSTM':
         model = Sequential([
             Input(shape=input_shape),
-            LSTM(32, activation='tanh', return_sequences=False),
+            LSTM(64, activation='tanh', return_sequences=False),
             # Dropout(0.1),
             # LSTM(16, activation='tanh', return_sequences=False),
             Dropout(0.1),
@@ -237,14 +237,25 @@ def create_model(model_type, input_shape):
     elif model_type == 'GRU':
         model = Sequential([
             Input(shape=input_shape),
-            GRU(32, activation='tanh', return_sequences=True),
+            GRU(64, activation='tanh', return_sequences=False),
             Dropout(0.1),
-            GRU(16, activation='tanh', return_sequences=False),
-            Dropout(0.1),
+            #GRU(16, activation='tanh', return_sequences=False),
+            #Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
         optimizer = keras.optimizers.Adam(learning_rate=0.0005)
+    
+    elif model_type == 'CNN':
+        model = Sequential([
+            Input(shape=input_shape),
+            Conv1D(filters=64, kernel_size=3, activation='relu'),
+            MaxPooling1D(pool_size=2),
+            Flatten(),
+            Dense(16, activation='relu'),
+            Dense(1, activation='relu')
+        ])
+        optimizer = keras.optimizers.Adam(learning_rate=0.001)
 
     # 2. Compilamos el modelo
     
@@ -263,6 +274,7 @@ print(f"CONSTRUYENDO ARQUITECTURAS DE LOS MODELOS...")
 model_RNN = create_model('RNN', forma_entrada)
 model_LSTM = create_model('LSTM', forma_entrada)
 model_GRU = create_model('GRU', forma_entrada)
+model_CNN = create_model('CNN', forma_entrada)
 
 model_GRU.summary()
 
@@ -270,7 +282,7 @@ model_GRU.summary()
 early_stopping = EarlyStopping(monitor='val_loss', patience=50, restore_best_weights=True, verbose=1)
 reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7 , min_lr=1e-6, verbose=1)
 
-n_epochs = 100
+n_epochs = 200
 batch_size = 64
 
 def model_training(model, model_name):
@@ -309,6 +321,7 @@ print(f"\nCOMENZANDO EL ENTRENAMIENTO DE LOS MODELOS...")
 historial_RNN = model_training(model_RNN, 'Simple RNN')
 historial_LSTM = model_training(model_LSTM, 'LSTM')
 historial_GRU = model_training(model_GRU, 'GRU')
+historial_CNN = model_training(model_CNN, 'CNN')
 
 print(f"\n ¡ENTRENAMIENTO COMPLETADO! LOS MODELOS HAN SIDO ENTRENADOS EXITOSAMENTE.")
 
@@ -350,6 +363,7 @@ print("-" * 83)
 preds_rnn_real, mae_rnn, r2_rnn, kb_rnn = evaluar_modelo(model_RNN, "Simple RNN")
 preds_lstm_real, mae_lstm, r2_lstm, kb_lstm = evaluar_modelo(model_LSTM, "LSTM")
 preds_gru_real, mae_gru, r2_gru, kb_gru = evaluar_modelo(model_GRU, "GRU")
+preds_cnn_real, mae_cnn, r2_cnn, kb_cnn = evaluar_modelo(model_CNN, "CNN")
 
 print("="*83 + "\n")
 
@@ -360,7 +374,7 @@ COLOR_REAL = '#000000'
 COLOR_RNN  = '#D32F2F'
 COLOR_LSTM = '#1976D2'
 COLOR_GRU  = '#388E3C'
-
+COLOR_CNN  = '#9C27B0'
 # =====================================================================
 # GRÁFICA 1: LA CARRERA DEL APRENDIZAJE (Val Loss de los 3 juntos)
 # =====================================================================
@@ -368,6 +382,7 @@ plt.figure(figsize=(10, 6))
 plt.plot(historial_RNN.history['val_loss'], label='Simple RNN', color=COLOR_RNN, linewidth=2.5)
 plt.plot(historial_LSTM.history['val_loss'], label='LSTM', color=COLOR_LSTM, linewidth=2.5)
 plt.plot(historial_GRU.history['val_loss'], label='GRU', color=COLOR_GRU, linewidth=2.5)
+plt.plot(historial_CNN.history['val_loss'], label='CNN', color=COLOR_CNN, linewidth=2.5)
 
 plt.title('Evolución del Error de Validación durante el Entrenamiento', fontsize=16, fontweight='bold')
 plt.xlabel('Épocas', fontsize=13)
@@ -381,22 +396,20 @@ plt.show()
 # =====================================================================
 # GRÁFICA 1B: SALUD DEL MODELO (Train vs Validation Loss)
 # =====================================================================
-fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+fig, axes = plt.subplots(2, 2, figsize=(16, 10))
 fig.suptitle('Diagnóstico de Entrenamiento: Pérdida (Train) vs Validación (Val)', fontsize=16, fontweight='bold')
 
-# Historiales y nombres para iterar fácilmente
-historiales = [historial_RNN, historial_LSTM, historial_GRU]
-nombres = ['Simple RNN', 'LSTM', 'GRU']
-colores = [COLOR_RNN, COLOR_LSTM, COLOR_GRU]
+historiales = [historial_RNN, historial_LSTM, historial_GRU, historial_CNN]
+nombres = ['Simple RNN', 'LSTM', 'GRU', 'CNN']
+colores = [COLOR_RNN, COLOR_LSTM, COLOR_GRU, COLOR_CNN]
+axes = axes.flatten()
 
-for i in range(3):
+for i in range(4):
     ax = axes[i]
-    # Extraemos los datos de la memoria del entrenamiento
     loss = historiales[i].history['loss']
     val_loss = historiales[i].history['val_loss']
     epocas = range(len(loss))
     
-    # Dibujamos Entrenamiento (línea normal) y Validación (línea gruesa del color del modelo)
     ax.plot(epocas, loss, label='Training Loss', color='gray', linestyle='--', linewidth=2)
     ax.plot(epocas, val_loss, label='Validation Loss', color=colores[i], linewidth=2.5)
     
@@ -407,8 +420,7 @@ for i in range(3):
     ax.grid(True, linestyle='--', alpha=0.7)
 
 plt.tight_layout()
-# Ajustamos un poco para que el título principal no pise las gráficas
-plt.subplots_adjust(top=0.88) 
+plt.subplots_adjust(top=0.90) 
 plt.savefig(f'{carpeta_salida}/1b_diagnostico_train_val.png', dpi=300)
 plt.show()
 
@@ -419,7 +431,8 @@ plt.show()
 modelos_info = {
     'Simple RNN': {'preds': preds_rnn_real, 'r2': r2_rnn, 'color': COLOR_RNN},
     'LSTM':       {'preds': preds_lstm_real, 'r2': r2_lstm, 'color': COLOR_LSTM},
-    'GRU':        {'preds': preds_gru_real,  'r2': r2_gru,  'color': COLOR_GRU}
+    'GRU':        {'preds': preds_gru_real,  'r2': r2_gru,  'color': COLOR_GRU},
+    'CNN':        {'preds': preds_cnn_real,  'r2': r2_cnn,  'color': COLOR_CNN}
 }
 
 # 2. Buscamos el modelo con el R^2 más alto
@@ -431,9 +444,6 @@ mejor_r2     = modelos_info[mejor_nombre]['r2']
 print(f"\n Modelo seleccionado para la Gráfica de Dispersión: {mejor_nombre} (R^2 = {mejor_r2:.4f})")
 
 # 3. Gráfica de dispersión del modelo ganador
-plt.figure(figsize=(8, 8))
-max_val = np.max(y_val_real) * 1.05
-
 plt.figure(figsize=(8, 8))
 max_val = np.max(y_val_real) * 1.05
 
@@ -462,6 +472,7 @@ plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COL
 plt.plot(preds_rnn_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
 plt.plot(preds_lstm_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
 plt.plot(preds_gru_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
+plt.plot(preds_cnn_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='CNN', color=COLOR_CNN, linewidth=2)
 
 plt.title('Detalle de Predicción: Día Despejado (Curva de Campana)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
@@ -483,6 +494,7 @@ plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COL
 plt.plot(preds_rnn_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
 plt.plot(preds_lstm_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
 plt.plot(preds_gru_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
+plt.plot(preds_cnn_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='CNN', color=COLOR_CNN, linewidth=2)
 
 plt.title('Detalle de Predicción: Día Nublado (Alta Variabilidad)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
@@ -501,72 +513,50 @@ FIN = 1300
 
 plt.figure(figsize=(16, 6))
 
-# Dibujamos la línea de potencia REAL (más gruesa para que destaque)
 plt.plot(y_val_real[INICIO:FIN], label='Potencia Real Medida', color=COLOR_REAL, linewidth=3.5, zorder=5)
-
-# Dibujamos las predicciones de los modelos
 plt.plot(preds_rnn_real[INICIO:FIN], label='Predicción RNN', color=COLOR_RNN, linewidth=2, linestyle='--', alpha=0.9)
 plt.plot(preds_lstm_real[INICIO:FIN], label='Predicción LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
 plt.plot(preds_gru_real[INICIO:FIN], label='Predicción GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
+plt.plot(preds_cnn_real[INICIO:FIN], label='Predicción CNN', color=COLOR_CNN, linewidth=2, alpha=0.9)
 
 plt.title('Comparativa de Potencia Generada (Finales Octubre)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (Intervalos de 10 min)', fontsize=13)
 plt.ylabel('Potencia (W)', fontsize=13)
 
-# Ponemos la leyenda fuera del gráfico si tapa las curvas, o ajustamos su posición
 plt.legend(fontsize=12, loc='upper right', framealpha=0.9)
 plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
-
-# Ajustes para que no se corte nada al guardar
 plt.margins(x=0)
 plt.tight_layout()
-
-# Guardamos la imagen
 plt.savefig(f'{carpeta_salida}/5_comparativa_temporal_kW.png', dpi=300)
 plt.show()
 
 # =====================================================================
 # GRÁFICA 6: BARRAS BI-OBJETIVO (Error MAE vs Tamaño en KB)
 # =====================================================================
-# Empaquetamos los valores que ya calculaste previamente en la tabla
-etiquetas = ['Simple RNN', 'LSTM', 'GRU']
-valores_mae = [mae_rnn, mae_lstm, mae_gru]
-valores_kb = [kb_rnn, kb_lstm, kb_gru]
+etiquetas = ['Simple RNN', 'LSTM', 'GRU', 'CNN']
+valores_mae = [mae_rnn, mae_lstm, mae_gru, mae_cnn]
+valores_kb = [kb_rnn, kb_lstm, kb_gru, kb_cnn]
 
 x = np.arange(len(etiquetas))
-width = 0.35  # Ancho de las barras
+width = 0.35  
 
-# Creamos la figura "A lo grande"
 fig, ax1 = plt.subplots(figsize=(10, 6))
 
-# --- EJE Y IZQUIERDO (MAE) ---
-# Usamos un naranja fuerte y marcamos el borde en negro (ideal para imprimir)
 bar1 = ax1.bar(x - width/2, valores_mae, width, label='Error MAE (kW)', color='#F57C00', edgecolor='black', linewidth=1.5)
 ax1.set_ylabel('Error Promedio (MAE en W)', fontsize=13, fontweight='bold', color='#F57C00')
 ax1.tick_params(axis='y', labelcolor='#F57C00', labelsize=11)
 ax1.set_xticks(x)
 ax1.set_xticklabels(etiquetas, fontsize=13, fontweight='bold')
-
-# Damos un 15% de espacio extra arriba para que quepan los números sin pisar el borde
 ax1.set_ylim(0, max(valores_mae) * 1.15) 
 
-# --- EJE Y DERECHO (KILOBYTES) ---
-# Clonamos el eje X para crear un segundo eje Y
 ax2 = ax1.twinx()  
-# Usamos un morado/índigo fuerte
 bar2 = ax2.bar(x + width/2, valores_kb, width, label='Tamaño Estimado (KB)', color='#4527A0', edgecolor='black', linewidth=1.5)
 ax2.set_ylabel('Memoria Flash Estimada (KB)', fontsize=13, fontweight='bold', color='#4527A0')
 ax2.tick_params(axis='y', labelcolor='#4527A0', labelsize=11)
-
-# Damos un 15% de espacio extra arriba también aquí
 ax2.set_ylim(0, max(valores_kb) * 1.15)
 
-# --- DETALLES DE FORMATO ---
 plt.title('Comparativa TinyML: Precisión vs. Ligereza de Hardware', fontsize=16, fontweight='bold', pad=15)
 
-
-# ¡EL TRUCO PRO!: Añadir los valores exactos encima de cada barra
-# Esto evita que el tribunal tenga que usar una regla para "adivinar" el valor
 for bar in bar1:
     yval = bar.get_height()
     ax1.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_mae)*0.02), 
@@ -578,9 +568,6 @@ for bar in bar2:
              f'{yval:.1f}', ha='center', va='bottom', fontsize=11, fontweight='bold')
 
 plt.tight_layout()
-# Bajamos un poco el área del gráfico para hacer hueco a la leyenda superior
 plt.subplots_adjust(top=0.82) 
-
-# Guardamos en alta resolución
 plt.savefig(f'{carpeta_salida}/6_barras_biobjetivo.png', dpi=300)
 plt.show()
