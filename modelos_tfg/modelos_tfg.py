@@ -72,7 +72,7 @@ data['mes_sin'] = np.sin(meses * (2 * np.pi / 12))
 data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 
 # 2.4. Seleccionamos las características relevantes para el modelo
-features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'V_gen', 'I_gen', 'Pot_inv'] # Quito Pot_Gen
+features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv'] # Quito Pot_Gen, V_gen e I_gen
 data_selected = data[features]
 
 print(f"------------------------------------------------------------------------")
@@ -216,7 +216,7 @@ def create_model(model_type, input_shape):
         model = Sequential([
             Input(shape=input_shape),
             SimpleRNN(64, activation='tanh', return_sequences=False),
-            Dropout(0.1),
+            #Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
@@ -228,7 +228,7 @@ def create_model(model_type, input_shape):
             LSTM(64, activation='tanh', return_sequences=False),
             # Dropout(0.1),
             # LSTM(16, activation='tanh', return_sequences=False),
-            Dropout(0.1),
+            #Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1, activation='relu')
         ])
@@ -238,7 +238,7 @@ def create_model(model_type, input_shape):
         model = Sequential([
             Input(shape=input_shape),
             GRU(64, activation='tanh', return_sequences=False),
-            Dropout(0.1),
+            #Dropout(0.1),
             #GRU(16, activation='tanh', return_sequences=False),
             #Dropout(0.1),
             Dense(16, activation='relu'),
