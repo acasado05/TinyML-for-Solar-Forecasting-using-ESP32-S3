@@ -87,12 +87,12 @@ print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
 # 2.5. Matriz de correlación
-# corr_matrix = data_selected.corr()
-# plt.figure(figsize=(12, 10))
-# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-# plt.title('Matriz de Correlación')
-# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-# plt.show()
+corr_matrix = data_selected.corr()
+plt.figure(figsize=(12, 10))
+sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+plt.title('Matriz de Correlación')
+plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 # # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
 # plt.figure(figsize=(12, 5))
@@ -208,7 +208,7 @@ X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_
 print(f"FORMA DE X: {X_train.shape}")  # (n_samples, sequence_length, n_features)
 print(f"FORMA DE y: {y_train.shape}")  # (n_samples)
 
-# 4. CREACIÓN DE LOS MODELOS DE RNN, LSTM Y GRU
+# # 4. CREACIÓN DE LOS MODELOS DE RNN, LSTM Y GRU
 def create_model(model_type, input_shape):
     
     # 1. Elegimos la capa recurrente según lo que pida la función
@@ -216,44 +216,45 @@ def create_model(model_type, input_shape):
         model = Sequential([
             Input(shape=input_shape),
             SimpleRNN(64, activation='tanh', return_sequences=False),
-            #Dropout(0.1),
+            Dropout(0.1),
             Dense(16, activation='relu'),
-            Dense(1, activation='relu')
+            Dense(1)
         ])
         optimizer = keras.optimizers.Adam(learning_rate=0.001)
 
     elif model_type == 'LSTM':
         model = Sequential([
             Input(shape=input_shape),
-            LSTM(64, activation='tanh', return_sequences=False),
-            # Dropout(0.1),
+            LSTM(32, activation='tanh', return_sequences=False),
+            Dropout(0.1),
             # LSTM(16, activation='tanh', return_sequences=False),
             #Dropout(0.1),
             Dense(16, activation='relu'),
-            Dense(1, activation='relu')
+            Dense(1)
         ])
         optimizer = keras.optimizers.Adam(learning_rate=0.001)
 
     elif model_type == 'GRU':
         model = Sequential([
             Input(shape=input_shape),
-            GRU(64, activation='tanh', return_sequences=False),
-            #Dropout(0.1),
+            GRU(32, activation='tanh', return_sequences=False),
+            Dropout(0.1),
             #GRU(16, activation='tanh', return_sequences=False),
             #Dropout(0.1),
             Dense(16, activation='relu'),
-            Dense(1, activation='relu')
+            Dense(1)
         ])
         optimizer = keras.optimizers.Adam(learning_rate=0.0005)
     
     elif model_type == 'CNN':
         model = Sequential([
             Input(shape=input_shape),
-            Conv1D(filters=64, kernel_size=3, activation='relu'),
+            Conv1D(filters=32, kernel_size=3, activation='relu'),
             MaxPooling1D(pool_size=2),
             Flatten(),
+            Dropout(0.1),
             Dense(16, activation='relu'),
-            Dense(1, activation='relu')
+            Dense(1)
         ])
         optimizer = keras.optimizers.Adam(learning_rate=0.001)
 
@@ -338,6 +339,8 @@ def evaluar_modelo(model, model_name):
     
     # Inversa directa limpia
     predicciones_reales = scaler_y.inverse_transform(predicciones).flatten()
+    # Convertimos cualquier valor negativo predicho por la red en un 0 absoluto.
+    predicciones_reales = np.maximum(predicciones_reales, 0)
     
     # --- B. MÉTRICAS MATEMÁTICAS ---
     rmse = np.sqrt(mean_squared_error(y_val_real, predicciones_reales))
