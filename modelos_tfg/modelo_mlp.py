@@ -65,17 +65,37 @@ data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv'] 
 data_selected = data[features]
 
-print(f"------------------------------------------------------------------------")
-print(f"Cantidad total de filas: {len(data_selected)}")
-print(f"------------------------------------------------------------------------")
+# =====================================================================
+# 2.5. FILTRADO DE NOCHES (ANTES DEL ESCALADO Y LAS VENTANAS)
+# =====================================================================
+print(f"\n[FILTRADO] Eliminando registros con Irradiancia < 10 W/m²...")
+filas_antes = len(data_selected)
+data_selected = data_selected[data_selected['G_Glob'] > 10]
+filas_despues = len(data_selected)
+print(f"   -> Filas originales: {filas_antes}")
+print(f"   -> Filas con sol:    {filas_despues} (Se eliminaron {filas_antes - filas_despues} filas nocturnas)\n")
 
 # 3. SPLIT Y NORMALIZACIÓN DE LOS DATOS
-train_split = int(0.8 * len(data_selected))
-train_df = data_selected.iloc[:train_split]
-val_df = data_selected.iloc[train_split:]
+# Split por días aleatorio para garantizar distribución estacional homogénea
+dias_unicos = pd.Series(data_selected.index.date).unique()
+np.random.seed(42)
+np.random.shuffle(dias_unicos)
 
-print(f"Entrenamiento (80%): {len(train_df)} filas")
-print(f"Validación (20%): {len(val_df)} filas")
+n_train_dias = int(0.8 * len(dias_unicos))
+dias_train = set(dias_unicos[:n_train_dias])
+dias_val   = set(dias_unicos[n_train_dias:])
+
+fechas_index = pd.Series(data_selected.index.date, index=data_selected.index)
+train_df = data_selected[fechas_index.isin(dias_train)]
+val_df   = data_selected[fechas_index.isin(dias_val)]
+
+# MUY IMPORTANTE: reordenar cronológicamente dentro de cada split
+# para que create_multivariate_sequences funcione correctamente
+train_df = train_df.sort_index()
+val_df   = val_df.sort_index()
+
+print(f"Entrenamiento (80%): {len(train_df)} filas ({len(dias_train)} días)")
+print(f"Validación (20%):    {len(val_df)} filas ({len(dias_val)} días)")
 
 scaler_X = MinMaxScaler()
 scaler_y = MinMaxScaler()
@@ -101,6 +121,8 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
         tiempo_fin = timestamps[i + seq_length + look_ahead - 1]
         tiempo_real = tiempo_fin - tiempo_inicio
 
+        # Al haber filtrado las noches, este condicional descartará
+        # automáticamente cualquier ventana que salte del atardecer al amanecer.
         if tiempo_real == tiempo_esperado:
             ventana_X = X[i:(i + seq_length)]
             objetivo_y = y[i + seq_length + look_ahead - 1]
@@ -109,57 +131,40 @@ def create_multivariate_sequences(X, y, timestamps, seq_length, look_ahead):
         else:
             saltos_ignorados += 1
 
-    print(f"   -> Secuencias creadas: {len(Xs)} (Ignoradas: {saltos_ignorados})")
+    print(f"   -> Secuencias válidas creadas: {len(Xs)} (Ventanas nocturnas descartadas: {saltos_ignorados})")
     return np.array(Xs), np.array(ys)
 
-sequence_length = 6    # 3 horas
+sequence_length = 18    # Ventana temporal (1 hora con datos de 10 min)
 look_ahead = 6         # Predecir 1 hora en el futuro
 X_train, y_train = create_multivariate_sequences(transformed_train_X, transformed_train_y.flatten(), train_df.index, sequence_length, look_ahead)
 X_val, y_val = create_multivariate_sequences(transformed_val_X, transformed_val_y.flatten(), val_df.index, sequence_length, look_ahead)
-
-# =====================================================================
-# 3.4. FILTRADO DE NOCHES (Aislado para el MLP)
-# =====================================================================
-print("\n[INFO] Filtrando periodos nocturnos para el modelo MLP...")
-umbral = 0.01 
-
-mascara_sol_train = y_train > umbral
-X_train_dia = X_train[mascara_sol_train]
-y_train_dia = y_train[mascara_sol_train]
-
-mascara_sol_val = y_val > umbral
-X_val_dia = X_val[mascara_sol_val]
-y_val_dia = y_val[mascara_sol_val]
-
-print(f"   -> Train: {len(X_train)} originales -> {len(X_train_dia)} diurnas")
-print(f"   -> Val:   {len(X_val)} originales -> {len(X_val_dia)} diurnas\n")
 
 # 4. CREACIÓN DEL MODELO MLP
 def create_mlp_model(input_shape):
     model = Sequential([
         Input(shape=input_shape),
-        Flatten(), # Aplasta las secuencias 2D a 1D
+        Flatten(),
         Dense(64, activation='relu'),
-        Dropout(0.1),
+        Dropout(0.2),
         Dense(32, activation='relu'),
-        Dropout(0.1),
+        Dropout(0.15),
         Dense(16, activation='relu'),
-        Dense(1) # Linear por defecto (sin ReLU para evitar dying ReLU)
+        Dense(1, activation='relu')
     ])
-    optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = keras.optimizers.Adam(learning_rate=0.0005)
     model.compile(optimizer=optimizer, loss='mse', metrics=['mae'])
     return model
 
 forma_entrada = (sequence_length, X_train.shape[2]) 
 K.clear_session() 
 
-print(f"CONSTRUYENDO ARQUITECTURA DEL MLP...")
+print(f"\nCONSTRUYENDO ARQUITECTURA DEL MLP...")
 model_MLP = create_mlp_model(forma_entrada)
 model_MLP.summary()
 
 # 5. ENTRENAMIENTO DEL MODELO MLP
 early_stopping = EarlyStopping(monitor='val_loss', patience=50, restore_best_weights=True, verbose=1)
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=7 , min_lr=1e-6, verbose=1)
+reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5 , min_lr=1e-6, verbose=1)
 
 n_epochs = 200
 batch_size = 64
@@ -169,24 +174,28 @@ ruta_guardado = f"{carpeta_salida}/MLP_mejor.h5"
 checkpoint = ModelCheckpoint(filepath=ruta_guardado, monitor='val_loss', save_best_only=True, verbose=1)
 
 tiempo_inicio = time.time()
-historial_MLP = model_MLP.fit(X_train_dia, y_train_dia,
+historial_MLP = model_MLP.fit(X_train, y_train,
                               epochs=n_epochs,
                               batch_size=batch_size,
-                              validation_data=(X_val_dia, y_val_dia),
+                              validation_data=(X_val, y_val),
                               callbacks=[early_stopping, reduce_lr, checkpoint],
                               verbose=1)
 tiempo_fin = time.time()
 print(f"\nMODELO MLP ENTRENADO EN {(tiempo_fin - tiempo_inicio):.2f} SEGUNDOS")
 
-# 6. EVALUACIÓN CON EL DATASET DE VALIDACIÓN COMPLETO (DÍA + NOCHE)
-print(f"\nEVALUANDO EL MODELO MLP EN EL CONJUNTO DE VALIDACIÓN COMPLETO...")
+# 6. EVALUACIÓN (SOLO DATOS DIURNOS)
+print(f"\nEVALUANDO EL MODELO MLP EN EL CONJUNTO DE VALIDACIÓN...")
 y_val_real = scaler_y.inverse_transform(y_val.reshape(-1, 1)).flatten()
 
-# Predicción sobre el val COMPLETO (X_val) no el filtrado (X_val_dia)
 predicciones = model_MLP.predict(X_val, verbose=0)
 predicciones_reales = scaler_y.inverse_transform(predicciones).flatten()
 
-# CLIPPING FÍSICO: Eliminamos potencias negativas
+print(f"y_val_real min: {y_val_real.min():.1f}, max: {y_val_real.max():.1f}, mean: {y_val_real.mean():.1f}")
+print(f"predicciones min: {predicciones_reales.min():.1f}, max: {predicciones_reales.max():.1f}, mean: {predicciones_reales.mean():.1f}")
+print(f"Primeras 10 reales: {y_val_real[:10].round(1)}")
+print(f"Primeras 10 predichas: {predicciones_reales[:10].round(1)}")
+
+# CLIPPING FÍSICO
 predicciones_reales = np.maximum(predicciones_reales, 0)
 
 rmse = np.sqrt(mean_squared_error(y_val_real, predicciones_reales))
@@ -204,18 +213,18 @@ print("-" * 83)
 print(f"| {'MLP':10} | {mae:7.3f} W | {rmse:7.3f} W | {r2:6.4f} | {r2_ajustado:8.4f} | {flash_kb:8.1f} KB |")
 print("="*83 + "\n")
 
-# 7. VISUALIZACIONES (Solo para MLP)
+# 7. VISUALIZACIONES
 COLOR_REAL = '#000000'
-COLOR_MLP  = '#FF9800' # Naranja
+COLOR_MLP  = '#FF9800' 
 
 # 7.1 Curvas de Pérdida
 plt.figure(figsize=(8, 5))
 loss = historial_MLP.history['loss']
 val_loss = historial_MLP.history['val_loss']
 epocas = range(len(loss))
-plt.plot(epocas, loss, label='Training Loss (Día)', color='gray', linestyle='--', linewidth=2)
-plt.plot(epocas, val_loss, label='Validation Loss (Día)', color=COLOR_MLP, linewidth=2.5)
-plt.title('Diagnóstico de Entrenamiento: MLP', fontsize=14, fontweight='bold')
+plt.plot(epocas, loss, label='Training Loss', color='gray', linestyle='--', linewidth=2)
+plt.plot(epocas, val_loss, label='Validation Loss', color=COLOR_MLP, linewidth=2.5)
+plt.title('Diagnóstico de Entrenamiento: MLP (Sin Noches)', fontsize=14, fontweight='bold')
 plt.xlabel('Épocas', fontsize=12)
 plt.ylabel('Loss (MSE)', fontsize=12)
 plt.legend(fontsize=11)
@@ -229,7 +238,7 @@ plt.figure(figsize=(7, 7))
 max_val = np.max(y_val_real) * 1.05
 plt.scatter(y_val_real, predicciones_reales, alpha=0.6, color=COLOR_MLP, s=20, label='Predicciones MLP')
 plt.plot([0, max_val], [0, max_val], color=COLOR_REAL, linestyle='--', linewidth=2.5, label='Ideal')
-plt.title('Dispersión del Modelo MLP: Real vs. Predicción', fontsize=14, fontweight='bold')
+plt.title('Dispersión del Modelo MLP (Sin Noches)', fontsize=14, fontweight='bold')
 plt.xlabel('Potencia Real (W)', fontsize=12)
 plt.ylabel('Potencia Predicha (W)', fontsize=12)
 plt.xlim(0, max_val)
@@ -240,48 +249,18 @@ plt.tight_layout()
 plt.savefig(f'{carpeta_salida}/2_dispersion.png', dpi=300)
 plt.show()
 
-# 7.3 Zoom Soleado
-DIA_SOLEADO_INICIO = 0
-DIA_SOLEADO_FIN = 144
-plt.figure(figsize=(12, 4))
-plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
-plt.plot(predicciones_reales[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='MLP', color=COLOR_MLP, linewidth=2)
-plt.title('Detalle de Predicción: Día Despejado (MLP)', fontsize=14, fontweight='bold')
-plt.xlabel('Pasos de Tiempo (10 min)', fontsize=12)
-plt.ylabel('Potencia (W)', fontsize=12)
-plt.legend(fontsize=11)
-plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
-plt.tight_layout()
-plt.savefig(f'{carpeta_salida}/3_zoom_soleado.png', dpi=300)
-plt.show()
-
-# 7.4 Zoom Nublado
-DIA_NUBLADO_INICIO = 4170
-DIA_NUBLADO_FIN = 4320
-plt.figure(figsize=(12, 4))
-plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
-plt.plot(predicciones_reales[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='MLP', color=COLOR_MLP, linewidth=2)
-plt.title('Detalle de Predicción: Día Nublado (MLP)', fontsize=14, fontweight='bold')
-plt.xlabel('Pasos de Tiempo (10 min)', fontsize=12)
-plt.ylabel('Potencia (W)', fontsize=12)
-plt.legend(fontsize=11)
-plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
-plt.tight_layout()
-plt.savefig(f'{carpeta_salida}/4_zoom_nublado.png', dpi=300)
-plt.show()
-
-# 7.5 Comparativa Temporal Final
-INICIO = 280
-FIN = 1300
+# 7.3 Comparativa Temporal "Continua" (Solo horas de sol concatenadas)
+INICIO = 0
+FIN = 800
 plt.figure(figsize=(16, 5))
 plt.plot(y_val_real[INICIO:FIN], label='Potencia Real', color=COLOR_REAL, linewidth=3.5, zorder=6)
 plt.plot(predicciones_reales[INICIO:FIN], label='Predicción MLP', color=COLOR_MLP, linewidth=2, alpha=0.9)
-plt.title('Comparativa Temporal de Potencia Generada (MLP)', fontsize=14, fontweight='bold')
-plt.xlabel('Pasos de Tiempo', fontsize=12)
+plt.title('Comparativa Temporal de Potencia (Visualización concatenada sin noches)', fontsize=14, fontweight='bold')
+plt.xlabel('Pasos de Tiempo (Solo Diurnos Válidos)', fontsize=12)
 plt.ylabel('Potencia (W)', fontsize=12)
 plt.legend(fontsize=11, loc='upper right', framealpha=0.9)
 plt.grid(True, which='major', linestyle='--', linewidth=1.2, color='black', alpha=0.3)
 plt.margins(x=0)
 plt.tight_layout()
-plt.savefig(f'{carpeta_salida}/5_comparativa_temporal.png', dpi=300)
+plt.savefig(f'{carpeta_salida}/3_comparativa_temporal.png', dpi=300)
 plt.show()
