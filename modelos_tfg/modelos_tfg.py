@@ -7,7 +7,7 @@ import time
 
 import tensorflow as tf
 from tensorflow import keras
-from keras.layers import Input, SimpleRNN, LSTM,GRU, Dense, Dropout, Conv1D, MaxPooling1D, Flatten
+from keras.layers import Input, SimpleRNN, LSTM, GRU, Dense, Dropout, Conv1D, MaxPooling1D, Flatten
 from keras.models import Model, Sequential
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from keras import backend as K
@@ -87,12 +87,12 @@ print(f"Cantidad total de filas: {len(data_selected)}")
 print(f"------------------------------------------------------------------------")
 
 # 2.5. Matriz de correlación
-corr_matrix = data_selected.corr()
-plt.figure(figsize=(12, 10))
-sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
-plt.title('Matriz de Correlación')
-plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
-plt.show()
+# corr_matrix = data_selected.corr()
+# plt.figure(figsize=(12, 10))
+# sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
+# plt.title('Matriz de Correlación')
+# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.show()
 
 # # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
 # plt.figure(figsize=(12, 5))
@@ -244,7 +244,7 @@ def create_model(model_type, input_shape):
             Dense(16, activation='relu'),
             Dense(1)
         ])
-        optimizer = keras.optimizers.Adam(learning_rate=0.0005)
+        optimizer = keras.optimizers.Adam(learning_rate=0.001)
     
     elif model_type == 'CNN':
         model = Sequential([
@@ -252,6 +252,17 @@ def create_model(model_type, input_shape):
             Conv1D(filters=32, kernel_size=3, activation='relu'),
             MaxPooling1D(pool_size=2),
             Flatten(),
+            Dropout(0.1),
+            Dense(16, activation='relu'),
+            Dense(1)
+        ])
+        optimizer = keras.optimizers.Adam(learning_rate=0.001)
+    
+    elif model_type == 'MLP':
+        model = Sequential([
+            Input(shape=input_shape),  # Solo características, sin dimensión temporal
+            Flatten(),
+            Dense(32, activation='relu'),
             Dropout(0.1),
             Dense(16, activation='relu'),
             Dense(1)
@@ -276,8 +287,9 @@ model_RNN = create_model('RNN', forma_entrada)
 model_LSTM = create_model('LSTM', forma_entrada)
 model_GRU = create_model('GRU', forma_entrada)
 model_CNN = create_model('CNN', forma_entrada)
+model_MLP = create_model('MLP', forma_entrada)
 
-model_GRU.summary()
+#model_GRU.summary()
 
 
 early_stopping = EarlyStopping(monitor='val_loss', patience=50, restore_best_weights=True, verbose=1)
@@ -323,6 +335,7 @@ historial_RNN = model_training(model_RNN, 'Simple RNN')
 historial_LSTM = model_training(model_LSTM, 'LSTM')
 historial_GRU = model_training(model_GRU, 'GRU')
 historial_CNN = model_training(model_CNN, 'CNN')
+historial_MLP = model_training(model_MLP, 'MLP')
 
 print(f"\n ¡ENTRENAMIENTO COMPLETADO! LOS MODELOS HAN SIDO ENTRENADOS EXITOSAMENTE.")
 
@@ -367,7 +380,7 @@ preds_rnn_real, mae_rnn, r2_rnn, kb_rnn = evaluar_modelo(model_RNN, "Simple RNN"
 preds_lstm_real, mae_lstm, r2_lstm, kb_lstm = evaluar_modelo(model_LSTM, "LSTM")
 preds_gru_real, mae_gru, r2_gru, kb_gru = evaluar_modelo(model_GRU, "GRU")
 preds_cnn_real, mae_cnn, r2_cnn, kb_cnn = evaluar_modelo(model_CNN, "CNN")
-
+preds_mlp_real, mae_mlp, r2_mlp, kb_mlp = evaluar_modelo(model_MLP, "MLP")
 print("="*83 + "\n")
 
 # 7. Visualizaciones de los resultados de los entrenamientos
@@ -378,14 +391,17 @@ COLOR_RNN  = '#D32F2F'
 COLOR_LSTM = '#1976D2'
 COLOR_GRU  = '#388E3C'
 COLOR_CNN  = '#9C27B0'
+COLOR_MLP  = '#FF9800'
+
 # =====================================================================
-# GRÁFICA 1: LA CARRERA DEL APRENDIZAJE (Val Loss de los 3 juntos)
+# GRÁFICA 1: LA CARRERA DEL APRENDIZAJE
 # =====================================================================
-plt.figure(figsize=(10, 6))
+plt.figure(figsize=(12, 6))
 plt.plot(historial_RNN.history['val_loss'], label='Simple RNN', color=COLOR_RNN, linewidth=2.5)
 plt.plot(historial_LSTM.history['val_loss'], label='LSTM', color=COLOR_LSTM, linewidth=2.5)
 plt.plot(historial_GRU.history['val_loss'], label='GRU', color=COLOR_GRU, linewidth=2.5)
 plt.plot(historial_CNN.history['val_loss'], label='CNN', color=COLOR_CNN, linewidth=2.5)
+plt.plot(historial_MLP.history['val_loss'], label='MLP', color=COLOR_MLP, linewidth=2.5)
 
 plt.title('Evolución del Error de Validación durante el Entrenamiento', fontsize=16, fontweight='bold')
 plt.xlabel('Épocas', fontsize=13)
@@ -399,15 +415,16 @@ plt.show()
 # =====================================================================
 # GRÁFICA 1B: SALUD DEL MODELO (Train vs Validation Loss)
 # =====================================================================
-fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+# Como ahora son 5 modelos, usamos una cuadrícula de 3x2 y ocultamos el último panel
+fig, axes = plt.subplots(3, 2, figsize=(16, 15))
 fig.suptitle('Diagnóstico de Entrenamiento: Pérdida (Train) vs Validación (Val)', fontsize=16, fontweight='bold')
 
-historiales = [historial_RNN, historial_LSTM, historial_GRU, historial_CNN]
-nombres = ['Simple RNN', 'LSTM', 'GRU', 'CNN']
-colores = [COLOR_RNN, COLOR_LSTM, COLOR_GRU, COLOR_CNN]
+historiales = [historial_RNN, historial_LSTM, historial_GRU, historial_CNN, historial_MLP]
+nombres = ['Simple RNN', 'LSTM', 'GRU', 'CNN', 'MLP']
+colores = [COLOR_RNN, COLOR_LSTM, COLOR_GRU, COLOR_CNN, COLOR_MLP]
 axes = axes.flatten()
 
-for i in range(4):
+for i in range(5):
     ax = axes[i]
     loss = historiales[i].history['loss']
     val_loss = historiales[i].history['val_loss']
@@ -422,23 +439,25 @@ for i in range(4):
     ax.legend(fontsize=11)
     ax.grid(True, linestyle='--', alpha=0.7)
 
+# Ocultar el 6º panel vacío
+fig.delaxes(axes[5])
+
 plt.tight_layout()
-plt.subplots_adjust(top=0.90) 
+plt.subplots_adjust(top=0.93) 
 plt.savefig(f'{carpeta_salida}/1b_diagnostico_train_val.png', dpi=300)
 plt.show()
 
 # =====================================================================
 # GRÁFICA 2: DISPERSIÓN DEL GANADOR
 # =====================================================================
-# 1. Empaquetamos la información de los modelos en un diccionario
 modelos_info = {
     'Simple RNN': {'preds': preds_rnn_real, 'r2': r2_rnn, 'color': COLOR_RNN},
     'LSTM':       {'preds': preds_lstm_real, 'r2': r2_lstm, 'color': COLOR_LSTM},
     'GRU':        {'preds': preds_gru_real,  'r2': r2_gru,  'color': COLOR_GRU},
-    'CNN':        {'preds': preds_cnn_real,  'r2': r2_cnn,  'color': COLOR_CNN}
+    'CNN':        {'preds': preds_cnn_real,  'r2': r2_cnn,  'color': COLOR_CNN},
+    'MLP':        {'preds': preds_mlp_real,  'r2': r2_mlp,  'color': COLOR_MLP}
 }
 
-# 2. Buscamos el modelo con el R^2 más alto
 mejor_nombre = max(modelos_info, key=lambda k: modelos_info[k]['r2'])
 mejor_preds  = modelos_info[mejor_nombre]['preds']
 mejor_color  = modelos_info[mejor_nombre]['color']
@@ -446,14 +465,13 @@ mejor_r2     = modelos_info[mejor_nombre]['r2']
 
 print(f"\n Modelo seleccionado para la Gráfica de Dispersión: {mejor_nombre} (R^2 = {mejor_r2:.4f})")
 
-# 3. Gráfica de dispersión del modelo ganador
 plt.figure(figsize=(8, 8))
 max_val = np.max(y_val_real) * 1.05
 
 plt.scatter(y_val_real, mejor_preds, alpha=0.6, color=mejor_color, s=20, label=f'Predicciones {mejor_nombre}')
 plt.plot([0, max_val], [0, max_val], color=COLOR_REAL, linestyle='--', linewidth=2.5, label='Ideal')
 
-plt.title(f'Dispersión del Modelo Óptimo ({mejor_nombre}): Real vs. Predicción', fontsize=16, fontweight='bold')
+plt.title(f'Dispersión del Modelo Óptimo ({mejor_nombre})', fontsize=16, fontweight='bold')
 plt.xlabel('Potencia Real (W)', fontsize=13)
 plt.ylabel('Potencia Predicha (W)', fontsize=13)
 plt.xlim(0, max_val)
@@ -470,12 +488,13 @@ plt.show()
 DIA_SOLEADO_INICIO = 0
 DIA_SOLEADO_FIN = 144
 
-plt.figure(figsize=(12, 5))
+plt.figure(figsize=(14, 5))
 plt.plot(y_val_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
 plt.plot(preds_rnn_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
 plt.plot(preds_lstm_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
 plt.plot(preds_gru_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
 plt.plot(preds_cnn_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='CNN', color=COLOR_CNN, linewidth=2)
+plt.plot(preds_mlp_real[DIA_SOLEADO_INICIO:DIA_SOLEADO_FIN], label='MLP', color=COLOR_MLP, linewidth=2)
 
 plt.title('Detalle de Predicción: Día Despejado (Curva de Campana)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
@@ -492,12 +511,13 @@ plt.show()
 DIA_NUBLADO_INICIO = 4170
 DIA_NUBLADO_FIN = 4320
 
-plt.figure(figsize=(12, 5))
+plt.figure(figsize=(14, 5))
 plt.plot(y_val_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='Real', color=COLOR_REAL, linewidth=3.5)
 plt.plot(preds_rnn_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--')
 plt.plot(preds_lstm_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='LSTM', color=COLOR_LSTM, linewidth=2)
 plt.plot(preds_gru_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='GRU', color=COLOR_GRU, linewidth=2)
 plt.plot(preds_cnn_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='CNN', color=COLOR_CNN, linewidth=2)
+plt.plot(preds_mlp_real[DIA_NUBLADO_INICIO:DIA_NUBLADO_FIN], label='MLP', color=COLOR_MLP, linewidth=2)
 
 plt.title('Detalle de Predicción: Día Nublado (Alta Variabilidad)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (10 min)', fontsize=13)
@@ -509,18 +529,19 @@ plt.savefig(f'{carpeta_salida}/4_zoom_nublado.png', dpi=300)
 plt.show()
 
 # =====================================================================
-# GRÁFICA 5: COMPARATIVA TEMPORAL EN kW (Real vs. Predicciones)
+# GRÁFICA 5: COMPARATIVA TEMPORAL EN kW
 # =====================================================================
 INICIO = 280
 FIN = 1300
 
 plt.figure(figsize=(16, 6))
 
-plt.plot(y_val_real[INICIO:FIN], label='Potencia Real Medida', color=COLOR_REAL, linewidth=3.5, zorder=5)
-plt.plot(preds_rnn_real[INICIO:FIN], label='Predicción RNN', color=COLOR_RNN, linewidth=2, linestyle='--', alpha=0.9)
-plt.plot(preds_lstm_real[INICIO:FIN], label='Predicción LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
-plt.plot(preds_gru_real[INICIO:FIN], label='Predicción GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
-plt.plot(preds_cnn_real[INICIO:FIN], label='Predicción CNN', color=COLOR_CNN, linewidth=2, alpha=0.9)
+plt.plot(y_val_real[INICIO:FIN], label='Potencia Real Medida', color=COLOR_REAL, linewidth=3.5, zorder=6)
+plt.plot(preds_rnn_real[INICIO:FIN], label='RNN', color=COLOR_RNN, linewidth=2, linestyle='--', alpha=0.9)
+plt.plot(preds_lstm_real[INICIO:FIN], label='LSTM', color=COLOR_LSTM, linewidth=2, alpha=0.9)
+plt.plot(preds_gru_real[INICIO:FIN], label='GRU', color=COLOR_GRU, linewidth=2, alpha=0.9)
+plt.plot(preds_cnn_real[INICIO:FIN], label='CNN', color=COLOR_CNN, linewidth=2, alpha=0.9)
+plt.plot(preds_mlp_real[INICIO:FIN], label='MLP', color=COLOR_MLP, linewidth=2, alpha=0.9)
 
 plt.title('Comparativa de Potencia Generada (Finales Octubre)', fontsize=16, fontweight='bold')
 plt.xlabel('Pasos de Tiempo (Intervalos de 10 min)', fontsize=13)
@@ -534,18 +555,18 @@ plt.savefig(f'{carpeta_salida}/5_comparativa_temporal_kW.png', dpi=300)
 plt.show()
 
 # =====================================================================
-# GRÁFICA 6: BARRAS BI-OBJETIVO (Error MAE vs Tamaño en KB)
+# GRÁFICA 6: BARRAS BI-OBJETIVO
 # =====================================================================
-etiquetas = ['Simple RNN', 'LSTM', 'GRU', 'CNN']
-valores_mae = [mae_rnn, mae_lstm, mae_gru, mae_cnn]
-valores_kb = [kb_rnn, kb_lstm, kb_gru, kb_cnn]
+etiquetas = ['Simple RNN', 'LSTM', 'GRU', 'CNN', 'MLP']
+valores_mae = [mae_rnn, mae_lstm, mae_gru, mae_cnn, mae_mlp]
+valores_kb = [kb_rnn, kb_lstm, kb_gru, kb_cnn, kb_mlp]
 
 x = np.arange(len(etiquetas))
 width = 0.35  
 
-fig, ax1 = plt.subplots(figsize=(10, 6))
+fig, ax1 = plt.subplots(figsize=(12, 6))
 
-bar1 = ax1.bar(x - width/2, valores_mae, width, label='Error MAE (kW)', color='#F57C00', edgecolor='black', linewidth=1.5)
+bar1 = ax1.bar(x - width/2, valores_mae, width, label='Error MAE (W)', color='#F57C00', edgecolor='black', linewidth=1.5)
 ax1.set_ylabel('Error Promedio (MAE en W)', fontsize=13, fontweight='bold', color='#F57C00')
 ax1.tick_params(axis='y', labelcolor='#F57C00', labelsize=11)
 ax1.set_xticks(x)
