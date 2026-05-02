@@ -144,10 +144,8 @@ def create_mlp_model(input_shape):
     model = Sequential([
         Input(shape=input_shape),
         Flatten(),
-        Dense(64, activation='relu'),
-        Dropout(0.2),
         Dense(32, activation='relu'),
-        Dropout(0.15),
+        Dropout(0.2),
         Dense(16, activation='relu'),
         Dense(1, activation='relu')
     ])
