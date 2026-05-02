@@ -228,7 +228,7 @@ def create_model(model_type, input_shape):
             SimpleRNN(cfg['units'], activation='tanh', return_sequences=False),
             Dropout(cfg['dropout']),
             Dense(16, activation='relu'),
-            Dense(1,  activation='relu')
+            Dense(1)
         ], name='Simple_RNN')
         lr = cfg['lr']
 
@@ -238,7 +238,7 @@ def create_model(model_type, input_shape):
             LSTM(cfg['units'], activation='tanh', return_sequences=False),
             Dropout(cfg['dropout']),
             Dense(16, activation='relu'),
-            Dense(1,  activation='relu')
+            Dense(1)
         ], name='LSTM')
         lr = cfg['lr']
 
@@ -248,7 +248,7 @@ def create_model(model_type, input_shape):
             GRU(cfg['units'], activation='tanh', return_sequences=False),
             Dropout(cfg['dropout']),
             Dense(16, activation='relu'),
-            Dense(1,  activation='relu')
+            Dense(1)
         ], name='GRU')
         lr = cfg['lr']
 
@@ -260,7 +260,7 @@ def create_model(model_type, input_shape):
             MaxPooling1D(pool_size=2),
             Flatten(),
             Dense(16, activation='relu'),
-            Dense(1,  activation='relu')
+            Dense(1)
         ], name='CNN')
         lr = cfg['lr']
 
@@ -293,18 +293,18 @@ print()
 # =====================================================================
 # 6. ENTRENAMIENTO
 # =====================================================================
-early_stopping = EarlyStopping(
-    monitor='val_loss', patience=CONFIG['patience_es'],
-    restore_best_weights=True, verbose=1)
-
-reduce_lr = ReduceLROnPlateau(
-    monitor='val_loss', factor=CONFIG['lr_factor'],
-    patience=CONFIG['patience_lr'], min_lr=CONFIG['lr_min'], verbose=1)
-
 def entrenar_modelo(model, model_name):
     print(f"\n{'─'*60}")
     print(f"  ENTRENANDO: {model_name}")
     print(f"{'─'*60}")
+
+    early_stopping = EarlyStopping(
+        monitor='val_loss', patience=CONFIG['patience_es'],
+        restore_best_weights=True, verbose=1)
+
+    reduce_lr = ReduceLROnPlateau(
+        monitor='val_loss', factor=CONFIG['lr_factor'],
+        patience=CONFIG['patience_lr'], min_lr=CONFIG['lr_min'], verbose=1)
 
     ruta_guardado = os.path.join(carpeta_salida,
                                   f"{model_name.replace(' ', '_')}_mejor.h5")

@@ -1,0 +1,118 @@
+{
+    "version": "V13_DEFINITIVA",
+    "fecha": "2026-05-02 12:05",
+    "descripcion": "Versión final de selección de modelo. Hiperparámetros óptimos individuales por arquitectura derivados de la campaña V1-V12. Métricas duales (completo y diurno).",
+    "dataset": "datos_10min_modelos.csv",
+    "features": [
+        "hora_sin",
+        "hora_cos",
+        "mes_sin",
+        "mes_cos",
+        "G_Glob",
+        "Ta",
+        "Hum_Rel",
+        "Tc",
+        "Pot_inv"
+    ],
+    "target": "Pot_inv",
+    "seq_length": 18,
+    "look_ahead": 6,
+    "train_split": 0.8,
+    "n_epochs": 200,
+    "batch_size": 64,
+    "patience_es": 50,
+    "patience_lr": 10,
+    "lr_factor": 0.5,
+    "lr_min": 1e-06,
+    "umbral_diurno": 10.0,
+    "modelos": {
+        "RNN": {
+            "units": 64,
+            "lr": 0.001,
+            "dropout": 0.1,
+            "justificacion": "Mejor resultado en V9/V11. 64 unidades óptimas."
+        },
+        "LSTM": {
+            "units": 32,
+            "lr": 0.001,
+            "dropout": 0.1,
+            "justificacion": "Mejor resultado en V12 con 32 unidades. Mayor capacidad individual no mejora resultados."
+        },
+        "GRU": {
+            "units": 32,
+            "lr": 0.0005,
+            "dropout": 0.1,
+            "justificacion": "Mejor resultado en V11 con lr reducido. GRU sensible a lr alto por estructura de compuertas."
+        },
+        "CNN": {
+            "filters": 64,
+            "kernel": 3,
+            "lr": 0.001,
+            "dropout": 0.1,
+            "justificacion": "Arquitectura de referencia no recurrente."
+        }
+    },
+    "resultados": [
+        {
+            "nombre": "Simple RNN",
+            "mae_c": 48.53842310160931,
+            "rmse_c": 96.69683514700945,
+            "r2_c": 0.9453332375262616,
+            "r2a_c": 0.9452915071732283,
+            "mae_d": 117.86029745642385,
+            "rmse_d": 155.45672941318026,
+            "r2_d": 0.7866246268306154,
+            "r2a_d": 0.7861898323870711,
+            "flash_kb": 22.37890625,
+            "params": 5729,
+            "tiempo_train": 196.4,
+            "epocas": 60
+        },
+        {
+            "nombre": "LSTM",
+            "mae_c": 51.738458103057795,
+            "rmse_c": 92.93099614709125,
+            "r2_c": 0.9495082969522263,
+            "r2a_c": 0.949469753667457,
+            "mae_d": 118.28048271324614,
+            "rmse_d": 149.73871828386362,
+            "r2_d": 0.8020326984439985,
+            "r2a_d": 0.8016293009879496,
+            "flash_kb": 22.62890625,
+            "params": 5793,
+            "tiempo_train": 332.8,
+            "epocas": 71
+        },
+        {
+            "nombre": "GRU",
+            "mae_c": 48.079263435168116,
+            "rmse_c": 102.46433513889413,
+            "r2_c": 0.9386175403215077,
+            "r2a_c": 0.9385706834820584,
+            "mae_d": 125.6583647883306,
+            "rmse_d": 166.56798606036972,
+            "r2_d": 0.7550325901634376,
+            "r2a_d": 0.7545334207088547,
+            "flash_kb": 17.87890625,
+            "params": 4577,
+            "tiempo_train": 546.8,
+            "epocas": 106
+        },
+        {
+            "nombre": "CNN",
+            "mae_c": 63.24406740485412,
+            "rmse_c": 123.16320417339605,
+            "r2_c": 0.9113128309605254,
+            "r2a_c": 0.9112451308314876,
+            "mae_d": 155.0093990421901,
+            "rmse_d": 196.97269459662172,
+            "r2_d": 0.657439492909978,
+            "r2a_d": 0.6567414582546749,
+            "flash_kb": 38.37890625,
+            "params": 9825,
+            "tiempo_train": 152.3,
+            "epocas": 59
+        }
+    ],
+    "modelo_ganador": "LSTM"
+}
