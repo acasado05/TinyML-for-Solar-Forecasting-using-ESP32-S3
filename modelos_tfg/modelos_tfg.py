@@ -72,7 +72,7 @@ data['mes_sin'] = np.sin(meses * (2 * np.pi / 12))
 data['mes_cos'] = np.cos(meses * (2 * np.pi / 12))
 
 # 2.4. Seleccionamos las características relevantes para el modelo
-features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv'] # Quito Pot_Gen, V_gen e I_gen
+features = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos', 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv'] # Quito Pot_gen, V_gen e I_gen
 data_selected = data[features]
 
 print(f"------------------------------------------------------------------------")
@@ -91,7 +91,7 @@ print(f"------------------------------------------------------------------------
 # plt.figure(figsize=(12, 10))
 # sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5)
 # plt.title('Matriz de Correlación')
-# plt.savefig('modelos_tfg/correlacion_matriz.png', dpi=300, bbox_inches='tight')
+# plt.savefig('modelos_tfg/correlacion_matriz_cmpt.png', dpi=300, bbox_inches='tight')
 # plt.show()
 
 # # 2.6. Gráfica de la irradiancia global a lo largo del tiempo
