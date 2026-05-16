@@ -4,8 +4,10 @@ import tensorflow as tf
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 import json
+import os
 
 # ─── Parámetros (mismos que V13) ──────────────────────────────────────
+EXPORT_DIR   = 'modelos_tfg/exportacion_micro'
 CSV_PATH     = 'modelos_tfg/datos_10min_modelos.csv'
 SEQ_LENGTH   = 18
 LOOK_AHEAD   = 6
@@ -14,6 +16,10 @@ FEATURES     = ['hora_sin','hora_cos','mes_sin','mes_cos',
 TARGET       = 'Pot_inv'
 UMBRAL_DIA   = 10.0   # W/m²
 N_CALIB      = 200    # muestras para calibrar la cuantización
+
+# ─── DIRECTORIO DE EXPORTACIÓN ────────────────────────────────────────
+os.makedirs(EXPORT_DIR, exist_ok=True) # Crea la carpeta si no existe
+print(f'[*] Todos los archivos se guardarán en: {EXPORT_DIR}')
 
 # ─── Carga y preprocesado (idéntico a V13) ────────────────────────────
 data = pd.read_csv(CSV_PATH, sep=';', decimal=',')
@@ -97,7 +103,18 @@ for nombre, ruta_h5 in modelos.items():
     print(f'{"="*55}')
 
     # ── Cargar modelo float32 ────────────────────────────────────────
-    model = tf.keras.models.load_model(ruta_h5, compile=False)
+    model_dinamico = tf.keras.models.load_model(ruta_h5, compile=False)
+    # 1. Creamos una "puerta de entrada" nueva, totalmente rígida y estática
+    nuevo_input = tf.keras.Input(batch_shape=(1, SEQ_LENGTH, len(FEATURES)-1))
+    # 2. Reconstruimos el flujo de la red conectando las capas originales
+    x = nuevo_input
+    for capa in model_dinamico.layers:
+        x = capa(x)
+    # 3. Empaquetamos el nuevo modelo clonado
+    model = tf.keras.Model(inputs=nuevo_input, outputs=x)
+    # 4. Le inyectamos la memoria (los pesos entrenados)
+    model.set_weights(model_dinamico.get_weights())
+
     params_f32 = model.count_params()
     flash_f32  = params_f32 * 4 / 1024
     print(f'  Float32 — params: {params_f32}  Flash est.: {flash_f32:.1f} KB')
@@ -110,7 +127,7 @@ for nombre, ruta_h5 in modelos.items():
     # ── Convertir a TFLite Float32 (sin cuantizar) ───────────────────
     conv_f32 = tf.lite.TFLiteConverter.from_keras_model(model)
     tflite_f32 = conv_f32.convert()
-    ruta_f32 = f'modelos_tfg/{nombre}_float32.tflite'
+    ruta_f32 = os.path.join(EXPORT_DIR, f'{nombre}_float32.tflite')
     with open(ruta_f32, 'wb') as f:
         f.write(tflite_f32)
     size_f32 = len(tflite_f32) / 1024
@@ -123,13 +140,11 @@ for nombre, ruta_h5 in modelos.items():
     conv_int8 = tf.lite.TFLiteConverter.from_keras_model(model)
     conv_int8.optimizations = [tf.lite.Optimize.DEFAULT]
     # Para cuantización de activaciones también (full INT8):
-    conv_int8.representative_dataset = representative_dataset
-    conv_int8.target_spec.supported_ops = [
-        tf.lite.OpsSet.TFLITE_BUILTINS,      # ops estándar float
-        tf.lite.OpsSet.SELECT_TF_OPS          # ops extendidas (LSTM/GRU)
-    ]
+    #conv_int8.representative_dataset = representative_dataset
+    conv_int8.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+
     tflite_int8 = conv_int8.convert()
-    ruta_int8 = f'modelos_tfg/{nombre}_int8.tflite'
+    ruta_int8 = os.path.join(EXPORT_DIR, f'{nombre}_int8.tflite')
     with open(ruta_int8, 'wb') as f:
         f.write(tflite_int8)
     size_int8 = len(tflite_int8) / 1024
@@ -143,10 +158,18 @@ for nombre, ruta_h5 in modelos.items():
     out = interp.get_output_details()[0]
 
     preds_int8 = []
+
+    print(f'  [INFO] Evaluando {len(X_val)} secuencias en INT8. Esto tardará un par de minutos...')
     for i in range(len(X_val)):
+        # Imprime el progreso cada 1000 predicciones
+        if i > 0 and i % 1000 == 0:
+            print(f'    ... Procesadas {i} de {len(X_val)} muestras')
+            
         interp.set_tensor(inp['index'], X_val[i:i+1].astype(np.float32))
         interp.invoke()
-        preds_int8.append(interp.get_tensor(out['index'])[0][0])
+        valor_predicho = interp.get_tensor(out['index']).flatten()[0]
+        preds_int8.append(valor_predicho)
+    print(f'  [INFO] Evaluación INT8 completada.')
 
     preds_int8 = scaler_y.inverse_transform(
         np.array(preds_int8).reshape(-1,1)).flatten()
@@ -178,7 +201,7 @@ for nombre, ruta_h5 in modelos.items():
         '};',
         f'const int {nombre_var}_data_len = {len(tflite_int8)};',
     ]
-    ruta_h = f'modelos_tfg/{nombre}_model.h'
+    ruta_h = os.path.join(EXPORT_DIR, f'{nombre}_model.h')
     with open(ruta_h, 'w') as f:
         f.write('\n'.join(lineas))
     print(f'  Header C generado: {ruta_h}')
@@ -203,18 +226,28 @@ scaler_params = {
     'X_max': scaler_X.data_max_.tolist(),
     'features': FEATURES[:-1],  # sin Pot_inv (es el target)
 }
-with open('modelos_tfg/scaler_params.json', 'w') as f:
+ruta_json = os.path.join(EXPORT_DIR, 'scaler_params.json')
+with open(ruta_json, 'w') as f:
     json.dump(scaler_params, f, indent=2)
-print('\n[OK] scaler_params.json guardado.')
+print(f'\n[OK] Parámetros guardados en: {ruta_json}')
 
 # ─── Tabla comparativa final ──────────────────────────────────────────
-print(f'\n{"="*70}')
-print(f'  TABLA COMPARATIVA FINAL')
-print(f'{"="*70}')
-print(f'{"Modelo":12} {"TFLite F32":>12} {"TFLite INT8":>12} {"Reduc.":>8} {"ΔMAE":>8} {"ΔR²":>8}')
-print('-'*70)
+texto_tabla = f'\n{"="*70}\n'
+texto_tabla += f'  TABLA COMPARATIVA FINAL\n'
+texto_tabla += f'{"="*70}\n'
+texto_tabla += f'{"Modelo":12} {"TFLite F32":>12} {"TFLite INT8":>12} {"Reduc.":>8} {"ΔMAE":>8} {"ΔR²":>8}\n'
+texto_tabla += '-'*70 + '\n'
 for nombre, r in resultados.items():
-    print(f'{nombre:12} {r["tflite_f32_kb"]:>10.1f}KB {r["tflite_int8_kb"]:>10.1f}KB '
-          f'{(1-r["tflite_int8_kb"]/r["tflite_f32_kb"])*100:>7.1f}% '
-          f'{r["delta_mae"]:>+7.1f}W {r["delta_r2"]:>+8.4f}')
-print(f'{"="*70}')
+    texto_tabla += (f'{nombre:12} {r["tflite_f32_kb"]:>10.1f}KB {r["tflite_int8_kb"]:>10.1f}KB '
+                    f'{(1-r["tflite_int8_kb"]/r["tflite_f32_kb"])*100:>7.1f}% '
+                    f'{r["delta_mae"]:>+7.1f}W {r["delta_r2"]:>+8.4f}\n')
+texto_tabla += f'{"="*70}\n'
+
+# Imprimimos por consola
+print(texto_tabla)
+
+# NUEVA RUTA PARA GUARDAR LA TABLA EN .TXT
+ruta_txt = os.path.join(EXPORT_DIR, 'resultados_cuantizacion.txt')
+with open(ruta_txt, 'w', encoding='utf-8') as f:
+    f.write(texto_tabla)
+print(f'[OK] Tabla de resultados exportada a: {ruta_txt}')
