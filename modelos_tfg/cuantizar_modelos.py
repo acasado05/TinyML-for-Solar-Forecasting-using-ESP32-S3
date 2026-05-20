@@ -150,17 +150,29 @@ for nombre, ruta_h5 in modelos.items():
     size_f32 = len(tflite_f32) / 1024
     print(f'\n  TFLite Float32: {size_f32:.1f} KB → {ruta_f32}')
 
-    # ── Convertir a TFLite INT8 (cuantización dinámica) ──────────────
+# ── Convertir a TFLite INT8 (FULL INTEGER QUANTIZATION - TFG) ──────────────
     conv_int8 = tf.lite.TFLiteConverter.from_keras_model(model)
     conv_int8.optimizations = [tf.lite.Optimize.DEFAULT]
-    conv_int8.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
+    
+    # 1. Activamos la calibración con el dataset para cuantizar las activaciones
+    conv_int8.representative_dataset = representative_dataset
+    
+    # 2. Obligamos a que TODAS las operaciones internas de la red sean INT8 puras
+    conv_int8.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+    
+    # 3. TRUCO MAGISTRAL: Mantenemos las puertas de entrada/salida en Float32
+    # Esto permite que tu código C++ (main.cpp) no tenga que cambiar y siga 
+    # enviando los datos y recibiendo los vatios como siempre. El micro hará 
+    # la conversión Float->INT8->Float de forma transparente en las fronteras.
+    conv_int8.inference_input_type = tf.float32
+    conv_int8.inference_output_type = tf.float32
 
     tflite_int8 = conv_int8.convert()
     ruta_int8 = os.path.join(EXPORT_DIR, f'{nombre}_int8.tflite')
     with open(ruta_int8, 'wb') as f:
         f.write(tflite_int8)
     size_int8 = len(tflite_int8) / 1024
-    print(f'  TFLite INT8:    {size_int8:.1f} KB → {ruta_int8}')
+    print(f'  TFLite INT8 (Full):    {size_int8:.1f} KB → {ruta_int8}')
     print(f'  Reducción:      {(1 - size_int8/size_f32)*100:.1f}%')
 
     # ── Evaluar TFLite INT8 ──────────────────────────────────────────
@@ -171,7 +183,7 @@ for nombre, ruta_h5 in modelos.items():
 
     preds_int8 = []
 
-    print(f'  [INFO] Evaluando {len(X_val)} secuencias en INT8. Esto tardará un par de minutos...')
+    print(f'  [INFO] Evaluando {len(X_val)} secuencias en INT8 Full...')
     for i in range(len(X_val)):
         if i > 0 and i % 1000 == 0:
             print(f'    ... Procesadas {i} de {len(X_val)} muestras')
@@ -184,9 +196,8 @@ for nombre, ruta_h5 in modelos.items():
 
     preds_int8 = scaler_y.inverse_transform(
         np.array(preds_int8).reshape(-1,1)).flatten()
-    res_int8 = evaluar(f'{nombre} INT8', preds_int8)
+    res_int8 = evaluar(f'{nombre} INT8 Full', preds_int8)
 
-    # ── Degradación por cuantización ────────────────────────────────
     delta_mae = res_int8['mae'] - res_f32['mae']
     delta_r2  = res_f32['r2']  - res_int8['r2']
     print(f'\n  Degradación: ΔMAE={delta_mae:+.1f}W  ΔR²={delta_r2:+.4f}')
@@ -194,14 +205,14 @@ for nombre, ruta_h5 in modelos.items():
     # ── Generar archivo .h de los pesos para ESP32 ──────────────────
     nombre_var = f'{nombre.lower()}_model'
     lineas = [
-        f'// Modelo {nombre} cuantizado INT8 (Unrolled) para ESP32-S3',
+        f'// Modelo {nombre} FULL INT8 para ESP32-S3 (Requisito TFG)',
         f'// Generado automáticamente — NO EDITAR',
         f'// Tamaño: {size_int8:.1f} KB',
         f'',
         f'#pragma once',
         f'#include <stdint.h>',
         f'',
-        f'alignas(8) const uint8_t {nombre_var}_data[] = {{',
+        f'alignas(16) const uint8_t {nombre_var}_data[] = {{',
     ]
     hex_bytes = [f'  0x{b:02x}' for b in tflite_int8]
     for j in range(0, len(hex_bytes), 12):

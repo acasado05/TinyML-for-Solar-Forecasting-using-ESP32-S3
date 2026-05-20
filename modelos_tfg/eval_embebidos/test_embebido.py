@@ -1,7 +1,8 @@
 import serial
 import time
 import os
-import datetime as datetime
+import re
+from datetime import datetime
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -11,7 +12,7 @@ import matplotlib.pyplot as plt
 # ─── Configuración ────────────────────────────────────────────────────
 PORT          = 'COM13'          # Windows: COM3  |  Linux: /dev/ttyUSB0
 BAUDRATE      = 115200
-TIMEOUT       = 5
+TIMEOUT       = 15
 MODELO_ACTUAL = 'LSTM_cmpt'  # Cuando evalue GRU, poner GRU
 CSV_PATH      = 'modelos_tfg/datos_10min_modelos.csv'
 SEQ_LEN       = 18
@@ -57,23 +58,12 @@ print(f'  Desde: {val_ts[0]}')
 print(f'  Hasta: {val_ts[-1]}')
 
 # ─── Precalcular máscara de ventanas temporalmente válidas ────────────
-# Una predicción en el índice i (que usa pasos i-(SEQ_LEN+LOOK_AHEAD-1)
-# a i) es válida si todos los pasos de la ventana son consecutivos.
-# Condición: ts[i] - ts[i - (SEQ_LEN + LOOK_AHEAD - 1)] == 
-#            (SEQ_LEN + LOOK_AHEAD - 1) * 10 minutos
-dt_ventana = pd.Timedelta(minutes=10 * (SEQ_LEN + LOOK_AHEAD - 1))
+# 1. Calculamos cuántos "saltos" (deltas) reales hay entre el índice de inicio 
+# y el índice del target.
+saltos_totales = (SEQ_LEN - 1) + (LOOK_AHEAD - 1) 
 
-# ventana_valida[i] = True si la predicción recibida tras enviar la fila i
-# corresponde a una ventana sin saltos temporales.
-# El ESP32 emite predicción después de recibir SEQ_LEN pasos,
-# con el target en el paso i + LOOK_AHEAD - 1 (look_ahead pasos adelante
-# desde el último paso de la ventana).
-# Índice del target para la predicción emitida al enviar fila i:
-#   target_idx = i + LOOK_AHEAD - 1  (si i >= SEQ_LEN - 1)
-# La ventana que usó el ESP32: filas [i - SEQ_LEN + 1 .. i]
-# Validez: ts[i] - ts[i - SEQ_LEN + 1 + 0] == (SEQ_LEN-1)*10min
-#          Y además ts[target_idx] - ts[i] == (LOOK_AHEAD)*10min
-# Simplificado: ts[target_idx] - ts[i - SEQ_LEN + 1] == dt_ventana
+# 2. Convertimos esos saltos a tiempo teórico (a razón de 10 mins por salto)
+dt_ventana = pd.Timedelta(minutes=10 * saltos_totales)
 
 ventana_valida = np.zeros(N_VAL, dtype=bool)
 target_idx_arr = np.full(N_VAL, -1, dtype=int)
@@ -82,7 +72,10 @@ for i in range(SEQ_LEN - 1, N_VAL):
     target_idx = i + LOOK_AHEAD - 1
     if target_idx >= N_VAL:
         break
+        
     ini_ventana = i - SEQ_LEN + 1
+    
+    # Comprobación de integridad temporal
     if (val_ts[target_idx] - val_ts[ini_ventana]) == dt_ventana:
         ventana_valida[i]    = True
         target_idx_arr[i]    = target_idx
@@ -151,39 +144,38 @@ print(f'Enviando {N_VAL} filas al ESP32...')
 t_inicio_total = time.time()
 
 for i in range(N_VAL):
-    # Enviar fila i (8 features sin normalizar)
-    linea = ','.join([f'{v:.6f}' for v in val_X_raw[i]])
-    ser.write((linea + '\n').encode())
-    ser.flush()
+        # 1. Enviar la fila con su número de secuencia
+        linea = f'SEQ:{i},' + ','.join([f'{v:.6f}' for v in val_X_raw[i]])
+        ser.write((linea + '\n').encode())
+        ser.flush()
 
-    # Leer respuesta con timeout
-    respuesta = ser.readline().decode('utf-8', errors='ignore').strip()
+        # 2. Tu mini-pausa mágica
+        # Le damos 50ms al ESP32 para que reciba, procese los 46ms y responda
+        time.sleep(0.05)
 
-    if respuesta.startswith('PRED:'):
-        # Formato: "PRED:1234.56,LAT:1823"
-        try:
-            partes   = respuesta.replace('PRED:', '').split(',LAT:')
-            pred_raw = float(partes[0])   # valor normalizado [0,1]
-            lat_us   = int(partes[1])
-            raw_preds[i]     = pred_raw
-            raw_latencias[i] = lat_us
-        except (ValueError, IndexError):
-            print(f'  [WARN] Fila {i}: respuesta mal formada: {respuesta}')
+        # 3. Recoger TODO lo que el ESP32 haya enviado al búfer en ese tiempo
+        while ser.in_waiting > 0:
+            respuesta = ser.readline().decode('utf-8', errors='ignore').strip()
+            
+            if respuesta.startswith('PRED:'):
+                match = re.search(r'PRED:SEQ:(\d+):([a-zA-Z0-9.-]+),LAT:(\d+)', respuesta)
+                if match:
+                    seq_recv = int(match.group(1))
+                    pred_str = match.group(2)
+                    lat_us   = int(match.group(3))
+                    
+                    pred_raw = np.nan if pred_str.lower() == 'nan' else float(pred_str)
+                    
+                    # Guardamos la predicción en su índice exacto
+                    if 0 <= seq_recv < N_VAL:
+                        raw_preds[seq_recv]     = pred_raw
+                        raw_latencias[seq_recv] = lat_us
 
-    elif respuesta.startswith('BUFFERING'):
-        pass   # normal durante el llenado del buffer
-
-    elif respuesta == '' or respuesta is None:
-        print(f'  [WARN] Fila {i}: timeout sin respuesta del ESP32')
-
-    else:
-        print(f'  [INFO] Fila {i}: {respuesta}')
-
-    # Progreso cada 500 filas
-    if (i + 1) % 500 == 0:
-        elapsed = time.time() - t_inicio_total
-        pct     = 100 * (i + 1) / N_VAL
-        print(f'  {i+1}/{N_VAL} ({pct:.0f}%) — {elapsed:.0f}s transcurridos')
+        # 4. Imprimir progreso
+        if (i + 1) % 500 == 0:
+            elapsed = time.time() - t_inicio_total
+            pct     = 100 * (i + 1) / N_VAL
+            print(f'  {i+1}/{N_VAL} ({pct:.0f}%) — {elapsed:.0f}s transcurridos')
 
 ser.close()
 t_total = time.time() - t_inicio_total
@@ -209,6 +201,14 @@ mask_final = (
     mask_recibido &
     (target_idx_arr >= 0)
 )
+
+# ─── DIAGNÓSTICO DEFINITIVO ───
+# print(f"\n--- DIAGNÓSTICO DE FILTROS ---")
+# print(f"1. Ventanas correctas (Fechas CSV Python): {ventana_valida.sum()}")
+# print(f"2. Predicciones recibidas (Enviadas por ESP32): {mask_recibido.sum()}")
+# print(f"3. Intersección final (Válidas para gráfica): {mask_final.sum()}")
+# import sys; sys.exit() # Cortamos la ejecución aquí para que no salte el error
+# ──────────────────────────────
 
 # Extraer valores finales alineados
 idx_validos   = np.where(mask_final)[0]
