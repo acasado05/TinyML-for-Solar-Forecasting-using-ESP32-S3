@@ -18,7 +18,7 @@ UMBRAL_DIA   = 10.0   # W/m²
 N_CALIB      = 200    # muestras para calibrar la cuantización
 
 # ─── DIRECTORIO DE EXPORTACIÓN ────────────────────────────────────────
-os.makedirs(EXPORT_DIR, exist_ok=True) # Crea la carpeta si no existe
+os.makedirs(EXPORT_DIR, exist_ok=True)
 print(f'[*] Todos los archivos se guardarán en: {EXPORT_DIR}')
 
 # ─── Carga y preprocesado (idéntico a V13) ────────────────────────────
@@ -67,8 +67,6 @@ y_val_real = scaler_y.inverse_transform(
     y_val.reshape(-1,1)).flatten()
 mascara_dia = g_val_seq > UMBRAL_DIA
 
-# ─── Dataset de calibración para la cuantización INT8 ─────────────────
-# Se usan muestras del conjunto de ENTRENAMIENTO (no validación)
 calib_idx = np.random.choice(len(X_train_seq), N_CALIB, replace=False)
 X_calib   = X_train_seq[calib_idx].astype(np.float32)
 
@@ -76,7 +74,6 @@ def representative_dataset():
     for i in range(len(X_calib)):
         yield [X_calib[i:i+1]]
 
-# ─── Función de evaluación unificada ──────────────────────────────────
 def evaluar(nombre, preds_real):
     preds_real = np.maximum(preds_real, 0)
     mae  = mean_absolute_error(y_val_real, preds_real)
@@ -89,7 +86,6 @@ def evaluar(nombre, preds_real):
     print(f'    MAE diurno={mae_d:.1f}W  R² diurno={r2_d:.4f}')
     return {'mae':mae,'rmse':rmse,'r2':r2,'mae_d':mae_d,'r2_d':r2_d}
 
-# ─── Cuantización de cada modelo ──────────────────────────────────────
 modelos = {
     'LSTM': 'modelos_tfg/entrenamiento_v13/LSTM_mejor.h5',
     'GRU':  'modelos_tfg/entrenamiento_v13/GRU_mejor.h5',
@@ -102,18 +98,39 @@ for nombre, ruta_h5 in modelos.items():
     print(f'  Procesando: {nombre}')
     print(f'{"="*55}')
 
-    # ── Cargar modelo float32 ────────────────────────────────────────
-    model_dinamico = tf.keras.models.load_model(ruta_h5, compile=False)
-    # 1. Creamos una "puerta de entrada" nueva, totalmente rígida y estática
-    nuevo_input = tf.keras.Input(batch_shape=(1, SEQ_LENGTH, len(FEATURES)-1))
-    # 2. Reconstruimos el flujo de la red conectando las capas originales
-    x = nuevo_input
-    for capa in model_dinamico.layers:
-        x = capa(x)
-    # 3. Empaquetamos el nuevo modelo clonado
-    model = tf.keras.Model(inputs=nuevo_input, outputs=x)
-    # 4. Le inyectamos la memoria (los pesos entrenados)
-    model.set_weights(model_dinamico.get_weights())
+    # ── Cargar modelo float32 original (el que tiene bucles WHILE) ──
+    model_original = tf.keras.models.load_model(ruta_h5, compile=False)
+    
+    # ── Reconstruir modelo DESENROLLADO (unroll=True) para microcontroladores ──
+    print(f'  [INFO] Desenrollando arquitectura (unroll=True) para evitar error INT32...')
+    
+    # 1. Creamos un modelo vacío
+    model_unrolled = tf.keras.Sequential()
+    
+    # 2. Fijamos la entrada rígidamente (obligatorio para hacer unroll)
+    model_unrolled.add(tf.keras.layers.InputLayer(input_shape=(SEQ_LENGTH, len(FEATURES)-1)))
+
+    # 3. Clonamos tu arquitectura exacta capa por capa
+    for capa in model_original.layers:
+        # Nos saltamos la entrada original porque ya la hemos puesto fija arriba
+        if isinstance(capa, tf.keras.layers.InputLayer):
+            continue
+            
+        config = capa.get_config()
+        
+        # Si es la LSTM o GRU, le inyectamos la magia
+        if isinstance(capa, (tf.keras.layers.LSTM, tf.keras.layers.GRU)):
+            config['unroll'] = True
+            model_unrolled.add(capa.__class__.from_config(config))
+        # Si es cualquier otra cosa (Dense, Dropout...), la copiamos tal cual
+        else:
+            model_unrolled.add(capa.__class__.from_config(config))
+
+    # 4. Inyectamos los pesos (ahora sí, encajarán perfectamente)
+    model_unrolled.set_weights(model_original.get_weights())
+    
+    # A partir de aquí, usamos el modelo desenrollado como el modelo principal
+    model = model_unrolled
 
     params_f32 = model.count_params()
     flash_f32  = params_f32 * 4 / 1024
@@ -122,7 +139,7 @@ for nombre, ruta_h5 in modelos.items():
     # ── Evaluar float32 como referencia ─────────────────────────────
     preds_f32 = scaler_y.inverse_transform(
         model.predict(X_val, verbose=0)).flatten()
-    res_f32 = evaluar(f'{nombre} Float32', preds_f32)
+    res_f32 = evaluar(f'{nombre} Float32 Unrolled', preds_f32)
 
     # ── Convertir a TFLite Float32 (sin cuantizar) ───────────────────
     conv_f32 = tf.lite.TFLiteConverter.from_keras_model(model)
@@ -134,13 +151,8 @@ for nombre, ruta_h5 in modelos.items():
     print(f'\n  TFLite Float32: {size_f32:.1f} KB → {ruta_f32}')
 
     # ── Convertir a TFLite INT8 (cuantización dinámica) ──────────────
-    # NOTA: LSTM y GRU no son cuantizables a INT8 completo con 
-    # TFLite estándar. Se usa cuantización de pesos (dynamic range)
-    # que es la compatible con ESP32-S3 vía esp-tflite-micro.
     conv_int8 = tf.lite.TFLiteConverter.from_keras_model(model)
     conv_int8.optimizations = [tf.lite.Optimize.DEFAULT]
-    # Para cuantización de activaciones también (full INT8):
-    #conv_int8.representative_dataset = representative_dataset
     conv_int8.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS]
 
     tflite_int8 = conv_int8.convert()
@@ -161,7 +173,6 @@ for nombre, ruta_h5 in modelos.items():
 
     print(f'  [INFO] Evaluando {len(X_val)} secuencias en INT8. Esto tardará un par de minutos...')
     for i in range(len(X_val)):
-        # Imprime el progreso cada 1000 predicciones
         if i > 0 and i % 1000 == 0:
             print(f'    ... Procesadas {i} de {len(X_val)} muestras')
             
@@ -181,10 +192,9 @@ for nombre, ruta_h5 in modelos.items():
     print(f'\n  Degradación: ΔMAE={delta_mae:+.1f}W  ΔR²={delta_r2:+.4f}')
 
     # ── Generar archivo .h de los pesos para ESP32 ──────────────────
-    # Convierte el .tflite a array C embebible directamente
     nombre_var = f'{nombre.lower()}_model'
     lineas = [
-        f'// Modelo {nombre} cuantizado INT8 para ESP32-S3',
+        f'// Modelo {nombre} cuantizado INT8 (Unrolled) para ESP32-S3',
         f'// Generado automáticamente — NO EDITAR',
         f'// Tamaño: {size_int8:.1f} KB',
         f'',
@@ -194,7 +204,6 @@ for nombre, ruta_h5 in modelos.items():
         f'alignas(8) const uint8_t {nombre_var}_data[] = {{',
     ]
     hex_bytes = [f'  0x{b:02x}' for b in tflite_int8]
-    # Agrupar en líneas de 12 bytes
     for j in range(0, len(hex_bytes), 12):
         lineas.append(', '.join(hex_bytes[j:j+12]) + ',')
     lineas += [
@@ -216,22 +225,18 @@ for nombre, ruta_h5 in modelos.items():
         'delta_r2': delta_r2,
     }
 
-# ─── Guardar scalers para usarlos en el ESP32 ─────────────────────────
-# Los parámetros del scaler_y son los únicos que necesitas en el micro
-# para desescalar la predicción
 scaler_params = {
     'y_min': float(scaler_y.data_min_[0]),
     'y_max': float(scaler_y.data_max_[0]),
     'X_min': scaler_X.data_min_.tolist(),
     'X_max': scaler_X.data_max_.tolist(),
-    'features': FEATURES[:-1],  # sin Pot_inv (es el target)
+    'features': FEATURES[:-1], 
 }
 ruta_json = os.path.join(EXPORT_DIR, 'scaler_params.json')
 with open(ruta_json, 'w') as f:
     json.dump(scaler_params, f, indent=2)
 print(f'\n[OK] Parámetros guardados en: {ruta_json}')
 
-# ─── Tabla comparativa final ──────────────────────────────────────────
 texto_tabla = f'\n{"="*70}\n'
 texto_tabla += f'  TABLA COMPARATIVA FINAL\n'
 texto_tabla += f'{"="*70}\n'
@@ -243,10 +248,8 @@ for nombre, r in resultados.items():
                     f'{r["delta_mae"]:>+7.1f}W {r["delta_r2"]:>+8.4f}\n')
 texto_tabla += f'{"="*70}\n'
 
-# Imprimimos por consola
 print(texto_tabla)
 
-# NUEVA RUTA PARA GUARDAR LA TABLA EN .TXT
 ruta_txt = os.path.join(EXPORT_DIR, 'resultados_cuantizacion.txt')
 with open(ruta_txt, 'w', encoding='utf-8') as f:
     f.write(texto_tabla)
