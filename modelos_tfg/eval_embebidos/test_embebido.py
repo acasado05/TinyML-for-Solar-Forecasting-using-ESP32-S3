@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 PORT          = 'COM13'          # Windows: COM3  |  Linux: /dev/ttyUSB0
 BAUDRATE      = 115200
 TIMEOUT       = 15
-MODELO_ACTUAL = 'LSTM_cmpt'  # Cuando evalue GRU, poner GRU
+MODELO_ACTUAL = 'GRU_cmpt'  # Cuando evalue GRU, poner GRU
 CSV_PATH      = 'modelos_tfg/datos_10min_modelos.csv'
 SEQ_LEN       = 18
 LOOK_AHEAD    = 6
@@ -265,7 +265,7 @@ print(sep)
 # ─── Comparativa con V13 Python ───────────────────────────────────────
 V13_LSTM = {'mae_c': 51.74, 'r2_c': 0.9495}
 V13_GRU  = {'mae_c': 48.08, 'r2_c': 0.9386}
-V13_REF  = V13_LSTM   # Cambiar a V13_GRU en caso de evaluar la otra
+V13_REF  = V13_GRU   # Cambiar a V13_LSTM en caso de evaluar la otra
 
 print(f'\n  DEGRADACIÓN POR CUANTIZACIÓN (vs V13 Python Float32):')
 print(f'    ΔMAE  completo  = {mae_c  - V13_REF["mae_c"]:+.1f} W')

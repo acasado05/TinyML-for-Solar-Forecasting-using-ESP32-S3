@@ -14,8 +14,8 @@ LOOK_AHEAD   = 6
 FEATURES     = ['hora_sin','hora_cos','mes_sin','mes_cos',
                 'G_Glob','Ta','Hum_Rel','Tc','Pot_inv']
 TARGET       = 'Pot_inv'
-UMBRAL_DIA   = 10.0   # W/m²
-N_CALIB      = 200    # muestras para calibrar la cuantización
+UMBRAL_DIA   = 10.0    # W/m²
+N_CALIB      = 3000    # muestras para calibrar la cuantización
 
 # ─── DIRECTORIO DE EXPORTACIÓN ────────────────────────────────────────
 os.makedirs(EXPORT_DIR, exist_ok=True)
@@ -88,7 +88,7 @@ def evaluar(nombre, preds_real):
 
 modelos = {
     'LSTM': 'modelos_tfg/entrenamiento_v13/LSTM_mejor.h5',
-    'GRU':  'modelos_tfg/entrenamiento_v13/GRU_mejor.h5',
+    'GRU':  'nuevo_GRU/GRU_mejor.h5',
 }
 
 resultados = {}
