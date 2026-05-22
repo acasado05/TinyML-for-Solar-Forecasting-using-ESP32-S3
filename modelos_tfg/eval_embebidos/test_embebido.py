@@ -10,10 +10,10 @@ from sklearn.metrics import mean_absolute_error, r2_score, mean_squared_error
 import matplotlib.pyplot as plt
 
 # ─── Configuración ────────────────────────────────────────────────────
-PORT          = 'COM13'          # Windows: COM3  |  Linux: /dev/ttyUSB0
+PORT          = 'COM14'          
 BAUDRATE      = 115200
-TIMEOUT       = 15
-MODELO_ACTUAL = 'GRU_cmpt'  # Cuando evalue GRU, poner GRU
+TIMEOUT       = 2
+MODELO_ACTUAL = 'LSTM_cmpt'  # Cuando evalue GRU, poner GRU
 CSV_PATH      = 'modelos_tfg/datos_10min_modelos.csv'
 SEQ_LEN       = 18
 LOOK_AHEAD    = 6
@@ -149,14 +149,17 @@ for i in range(N_VAL):
         ser.write((linea + '\n').encode())
         ser.flush()
 
-        # 2. Tu mini-pausa mágica
-        # Le damos 50ms al ESP32 para que reciba, procese los 46ms y responda
-        time.sleep(0.05)
-
-        # 3. Recoger TODO lo que el ESP32 haya enviado al búfer en ese tiempo
-        while ser.in_waiting > 0:
+        # 2. LECTURA DINÁMICA (Adiós al time.sleep)
+        # Nos quedamos escuchando hasta que el ESP32 hable o salte el timeout
+        while True:
             respuesta = ser.readline().decode('utf-8', errors='ignore').strip()
             
+            # Si la respuesta está vacía, es que han pasado los 2 segundos de timeout
+            if not respuesta:
+                print(f"  [ERROR] Timeout en la fila {i}. El ESP32 no respondió a tiempo.")
+                break 
+                
+            # Si recibimos predicción, la guardamos y rompemos el bucle de escucha
             if respuesta.startswith('PRED:'):
                 match = re.search(r'PRED:SEQ:(\d+):([a-zA-Z0-9.-]+),LAT:(\d+)', respuesta)
                 if match:
@@ -170,6 +173,12 @@ for i in range(N_VAL):
                     if 0 <= seq_recv < N_VAL:
                         raw_preds[seq_recv]     = pred_raw
                         raw_latencias[seq_recv] = lat_us
+                
+                break # Rompemos el while True para enviar la siguiente fila
+                
+            # Si está llenando la ventana de los 18 pasos, también rompemos y avanzamos
+            elif respuesta.startswith('BUFFERING'):
+                break 
 
         # 4. Imprimir progreso
         if (i + 1) % 500 == 0:
@@ -265,7 +274,7 @@ print(sep)
 # ─── Comparativa con V13 Python ───────────────────────────────────────
 V13_LSTM = {'mae_c': 51.74, 'r2_c': 0.9495}
 V13_GRU  = {'mae_c': 48.08, 'r2_c': 0.9386}
-V13_REF  = V13_GRU   # Cambiar a V13_LSTM en caso de evaluar la otra
+V13_REF  = V13_LSTM   # Cambiar a V13_LSTM en caso de evaluar la otra
 
 print(f'\n  DEGRADACIÓN POR CUANTIZACIÓN (vs V13 Python Float32):')
 print(f'    ΔMAE  completo  = {mae_c  - V13_REF["mae_c"]:+.1f} W')
