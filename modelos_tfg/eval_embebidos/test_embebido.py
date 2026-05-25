@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 PORT          = 'COM14'          
 BAUDRATE      = 115200
 TIMEOUT       = 2
-MODELO_ACTUAL = 'LSTM_cmpt'  # Cuando evalue GRU, poner GRU
+MODELO_ACTUAL = 'GRU_cmpt'  # Cuando evalue GRU, poner GRU
 CSV_PATH      = 'modelos_tfg/datos_10min_modelos.csv'
 SEQ_LEN       = 18
 LOOK_AHEAD    = 6
@@ -62,7 +62,7 @@ print(f'  Hasta: {val_ts[-1]}')
 # y el índice del target.
 saltos_totales = (SEQ_LEN - 1) + (LOOK_AHEAD - 1) 
 
-# 2. Convertimos esos saltos a tiempo teórico (a razón de 10 mins por salto)
+# 2. Convertimos esos saltos a tiempo teórico (a razón de 10 mins por salto)f
 dt_ventana = pd.Timedelta(minutes=10 * saltos_totales)
 
 ventana_valida = np.zeros(N_VAL, dtype=bool)
@@ -238,15 +238,15 @@ n_c, p_c = len(preds_final), val_X_raw.shape[1]
 r2a_c  = 1 - (1 - r2_c) * (n_c - 1) / (n_c - p_c - 1)
 
 # ─── Métricas diurnas (G_Glob del instante target > 10 W/m²) ─────────
-# mascara_dia = g_final > UMBRAL_DIA
-# preds_dia   = preds_final[mascara_dia]
-# reals_dia   = targets_final[mascara_dia]
+mascara_dia = g_final > UMBRAL_DIA
+preds_dia   = preds_final[mascara_dia]
+reals_dia   = targets_final[mascara_dia]
 
-# mae_d  = mean_absolute_error(reals_dia, preds_dia)
-# rmse_d = np.sqrt(mean_squared_error(reals_dia, preds_dia))
-# r2_d   = r2_score(reals_dia, preds_dia)
-# n_d    = mascara_dia.sum()
-# r2a_d  = 1 - (1 - r2_d) * (n_d - 1) / (n_d - p_c - 1)
+mae_d  = mean_absolute_error(reals_dia, preds_dia)
+rmse_d = np.sqrt(mean_squared_error(reals_dia, preds_dia))
+r2_d   = r2_score(reals_dia, preds_dia)
+n_d    = mascara_dia.sum()
+r2a_d  = 1 - (1 - r2_d) * (n_d - 1) / (n_d - p_c - 1)
 
 # ─── Latencias ────────────────────────────────────────────────────────
 lats_validas = lats_final[lats_final > 0]
@@ -262,6 +262,13 @@ print(f'    RMSE  = {rmse_c:.3f} W')
 print(f'    R²    = {r2_c:.4f}')
 print(f'    R² Aj.= {r2a_c:.4f}')
 
+print(f'\n  MÉTRICAS DIURNAS (G_Glob > {UMBRAL_DIA} W/m²) - {n_d} muestras:')
+print(f'    MAE   = {mae_d:.3f} W')
+print(f'    RMSE  = {rmse_d:.3f} W')
+print(f'    R²    = {r2_d:.4f}')
+print(f'    R² Aj.= {r2a_d:.4f}')
+# ──────────────────────────────────────────────────────────────────────
+
 print(f'\n  LATENCIA DE INFERENCIA:')
 if len(lats_validas) > 0:
     print(f'    Media  = {lats_validas.mean():.0f} µs  '
@@ -274,7 +281,7 @@ print(sep)
 # ─── Comparativa con V13 Python ───────────────────────────────────────
 V13_LSTM = {'mae_c': 51.74, 'r2_c': 0.9495}
 V13_GRU  = {'mae_c': 48.08, 'r2_c': 0.9386}
-V13_REF  = V13_LSTM   # Cambiar a V13_LSTM en caso de evaluar la otra
+V13_REF  = V13_GRU   # Cambiar a V13_LSTM en caso de evaluar la otra
 
 print(f'\n  DEGRADACIÓN POR CUANTIZACIÓN (vs V13 Python Float32):')
 print(f'    ΔMAE  completo  = {mae_c  - V13_REF["mae_c"]:+.1f} W')
@@ -350,3 +357,49 @@ if len(lats_validas) > 0:
     plt.close()
 
 print('\n[OK] Gráficas generadas por separado a 300 DPI y guardadas con éxito.')
+
+# 1. GRÁFICA DE JUSTIFICACIÓN DEL UMBRAL (Irradiancia)
+plt.figure(figsize=(10, 4))
+# Cogemos un tramo de unos 3 días (ej: 400 pasos de 10 min) para que se vea claro
+tramo = 400 
+plt.plot(g_final[:tramo], color='#F39C12', lw=2, label='Irradiancia Global (G_Glob)')
+plt.axhline(y=UMBRAL_DIA, color='red', linestyle='--', lw=2, 
+            label=f'Umbral de Máscara ({UMBRAL_DIA} W/m²)')
+plt.fill_between(range(tramo), 0, UMBRAL_DIA, color='red', alpha=0.1, label='Zona descartada (Noche)')
+
+plt.xlabel('Pasos de tiempo (Tramo de 3 días)', fontsize=12, fontweight='bold')
+plt.ylabel('Irradiancia (W/m²)', fontsize=12, fontweight='bold')
+plt.title('Justificación Física de la Máscara Diurna', fontsize=14, fontweight='bold')
+plt.legend(fontsize=11, loc='upper right')
+plt.grid(True, alpha=0.4)
+plt.tight_layout()
+plt.savefig(os.path.join(out_dir, f'justificacion_umbral_G_Glob.png'), dpi=300, bbox_inches='tight')
+plt.close()
+
+# 2. COMPARATIVA DE DISPERSIÓN (El engaño de la noche)
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+mx_val = max(targets_final.max(), preds_final.max()) * 1.05
+
+# Izquierda: 24 Horas Completas
+ax1.scatter(targets_final, preds_final, alpha=0.3, s=15, color='#2E5090')
+ax1.plot([0, mx_val], [0, mx_val], 'k--', lw=2)
+ax1.set_title(f'Evaluación Completa (24h)\nMancha artificial en (0,0)', fontsize=13, fontweight='bold')
+ax1.set_xlabel('Potencia Real (W)', fontsize=11, fontweight='bold')
+ax1.set_ylabel('Potencia Predicha (W)', fontsize=11, fontweight='bold')
+ax1.grid(True, alpha=0.5)
+
+# Derecha: Solo Día (Máscara Aplicada)
+mascara_dia = g_final > UMBRAL_DIA
+ax2.scatter(targets_final[mascara_dia], preds_final[mascara_dia], alpha=0.3, s=15, color='#D35400')
+ax2.plot([0, mx_val], [0, mx_val], 'k--', lw=2)
+ax2.set_title(f'Evaluación Estricta Diurna (G > {UMBRAL_DIA} W/m²)\nDispersión real bajo carga', fontsize=13, fontweight='bold')
+ax2.set_xlabel('Potencia Real (W)', fontsize=11, fontweight='bold')
+ax2.set_ylabel('Potencia Predicha (W)', fontsize=11, fontweight='bold')
+ax2.grid(True, alpha=0.5)
+
+plt.suptitle('Efecto del Filtrado Nocturno en las Métricas del Modelo', fontsize=16, fontweight='bold', y=1.02)
+plt.tight_layout()
+plt.savefig(os.path.join(out_dir, f'comparativa_dispersion_mascara.png'), dpi=300, bbox_inches='tight')
+plt.close()
+
+print('\n[OK] Gráficas de justificación para la memoria generadas.')
