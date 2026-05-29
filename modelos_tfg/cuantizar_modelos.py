@@ -110,7 +110,7 @@ for nombre, ruta_h5 in modelos.items():
     # 2. Fijamos la entrada rígidamente (obligatorio para hacer unroll)
     model_unrolled.add(tf.keras.layers.InputLayer(input_shape=(SEQ_LENGTH, len(FEATURES)-1)))
 
-    # 3. Clonamos tu arquitectura exacta capa por capa
+    # 3. Clonamos la arquitectura exacta capa por capa
     for capa in model_original.layers:
         # Nos saltamos la entrada original porque ya la hemos puesto fija arriba
         if isinstance(capa, tf.keras.layers.InputLayer):
@@ -118,7 +118,6 @@ for nombre, ruta_h5 in modelos.items():
             
         config = capa.get_config()
         
-        # Si es la LSTM o GRU, le inyectamos la magia
         if isinstance(capa, (tf.keras.layers.LSTM, tf.keras.layers.GRU)):
             config['unroll'] = True
             model_unrolled.add(capa.__class__.from_config(config))
@@ -126,7 +125,7 @@ for nombre, ruta_h5 in modelos.items():
         else:
             model_unrolled.add(capa.__class__.from_config(config))
 
-    # 4. Inyectamos los pesos (ahora sí, encajarán perfectamente)
+    # 4. Inyectamos los pesos
     model_unrolled.set_weights(model_original.get_weights())
     
     # A partir de aquí, usamos el modelo desenrollado como el modelo principal
