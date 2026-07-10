@@ -14,11 +14,11 @@ PORT          = 'COM14'
 BAUDRATE      = 115200
 TIMEOUT       = 2
 MODELO_ACTUAL = 'LSTM_cmpt'  # Cuando evalue GRU, poner GRU
-CSV_PATH      = 'train_LSTM/datos_10min_utc.csv'
+CSV_PATH      = 'train_LSTM/datos_10min_4549W_horabuena.csv'
 SEQ_LEN       = 18
 LOOK_AHEAD    = 6
 FEATURES      = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos',
-                    'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv']
+                 'G_Glob', 'Ta', 'Hum_Rel', 'Tc', 'Pot_inv']
 TARGET        = 'Pot_inv'
 UMBRAL_DIA    = 10.0   # W/m² — umbral G_Glob para métrica diurna
 
@@ -57,19 +57,30 @@ print(f'Conjunto de validación: {N_VAL} filas')
 print(f'  Desde: {val_ts[0]}')
 print(f'  Hasta: {val_ts[-1]}')
 
-# ─── Precalcular máscara de ventanas temporalmente válidas ────────────
-# 1. Calculamos cuántos "saltos" (deltas) reales hay entre el índice de inicio 
-# y el índice del target.
-saltos_totales = (SEQ_LEN - 1) + (LOOK_AHEAD - 1) 
+# Imputar NaN en val_X_raw con la media de cada columna del conjunto de entrenamiento
+col_means = np.nanmean(train_df.drop(columns=[TARGET]).values, axis=0)
+for col_idx in range(val_X_raw.shape[1]):
+    nan_mask = np.isnan(val_X_raw[:, col_idx])
+    if nan_mask.sum() > 0:
+        print(f"  [FIX] Imputando {nan_mask.sum()} NaN en columna {col_idx} "
+              f"({val_df.drop(columns=[TARGET]).columns[col_idx]}) "
+              f"con media={col_means[col_idx]:.4f}")
+        val_X_raw[nan_mask, col_idx] = col_means[col_idx]
 
-# 2. Convertimos esos saltos a tiempo teórico (a razón de 10 mins por salto)f
+# Verificar que no queden NaN
+assert not np.isnan(val_X_raw).any(), "[ERROR] Siguen habiendo NaN tras imputación"
+print("[OK] val_X_raw sin NaN")
+
+# ─── Precalcular máscara de ventanas temporalmente válidas ────────────
+# CORRECCIÓN 1: Ajuste del desfase temporal ("Off-by-one error")
+saltos_totales = (SEQ_LEN - 1) + LOOK_AHEAD 
 dt_ventana = pd.Timedelta(minutes=10 * saltos_totales)
 
 ventana_valida = np.zeros(N_VAL, dtype=bool)
 target_idx_arr = np.full(N_VAL, -1, dtype=int)
 
 for i in range(SEQ_LEN - 1, N_VAL):
-    target_idx = i + LOOK_AHEAD - 1
+    target_idx = i + LOOK_AHEAD
     if target_idx >= N_VAL:
         break
         
@@ -81,7 +92,7 @@ for i in range(SEQ_LEN - 1, N_VAL):
         target_idx_arr[i]    = target_idx
 
 n_validas = ventana_valida.sum()
-n_total   = (N_VAL - SEQ_LEN - LOOK_AHEAD + 2)
+n_total   = (N_VAL - SEQ_LEN - LOOK_AHEAD + 1)
 print(f'\nVentanas válidas (temporalmente continuas): '
       f'{n_validas} / {n_total} '
       f'({100*n_validas/max(n_total,1):.1f}%)')
@@ -118,7 +129,6 @@ while time.time() - t_inicio < 3:
             conexion_ok = True
             break
         elif respuesta:
-            # Si el ESP32 escupe un error de TFLite o reinicio, lo mostramos
             print(f'  [ESP32 LOG] {respuesta}')
 
 if not conexion_ok:
@@ -127,17 +137,12 @@ if not conexion_ok:
     print(' 1. TENSOR_ARENA_SIZE es muy pequeño y hay un bootloop (fíjate en los logs arriba).')
     print(' 2. El firmware no se ha subido correctamente.')
     ser.close()
-    exit() # Abortamos ejecución al instante
+    exit()
 
 print('  [OK] Respuesta PONG recibida. Enlace establecido.\n')
 
 # ─── Enviar TODAS las filas y recoger respuestas ──────────────────────
-# Se envían las 8 features sin normalizar (el ESP32 normaliza)
-# El ESP32 responde:
-#   - "BUFFERING:k/18"  mientras llena el buffer (primeros 17 pasos)
-#   - "PRED:X.XX,LAT:Y" a partir del paso 18 en adelante
-
-raw_preds     = np.full(N_VAL, np.nan)   # predicción recibida para cada fila i
+raw_preds     = np.full(N_VAL, np.nan)   
 raw_latencias = np.full(N_VAL, -1, dtype=int)
 
 print(f'Enviando {N_VAL} filas al ESP32...')
@@ -149,17 +154,14 @@ for i in range(N_VAL):
         ser.write((linea + '\n').encode())
         ser.flush()
 
-        # 2. LECTURA DINÁMICA (Adiós al time.sleep)
-        # Nos quedamos escuchando hasta que el ESP32 hable o salte el timeout
+        # 2. LECTURA DINÁMICA
         while True:
             respuesta = ser.readline().decode('utf-8', errors='ignore').strip()
             
-            # Si la respuesta está vacía, es que han pasado los 2 segundos de timeout
             if not respuesta:
                 print(f"  [ERROR] Timeout en la fila {i}. El ESP32 no respondió a tiempo.")
                 break 
                 
-            # Si recibimos predicción, la guardamos y rompemos el bucle de escucha
             if respuesta.startswith('PRED:'):
                 match = re.search(r'PRED:SEQ:(\d+):([a-zA-Z0-9.-]+),LAT:(\d+)', respuesta)
                 if match:
@@ -169,14 +171,12 @@ for i in range(N_VAL):
                     
                     pred_raw = np.nan if pred_str.lower() == 'nan' else float(pred_str)
                     
-                    # Guardamos la predicción en su índice exacto
                     if 0 <= seq_recv < N_VAL:
                         raw_preds[seq_recv]     = pred_raw
                         raw_latencias[seq_recv] = lat_us
                 
-                break # Rompemos el while True para enviar la siguiente fila
+                break 
                 
-            # Si está llenando la ventana de los 18 pasos, también rompemos y avanzamos
             elif respuesta.startswith('BUFFERING'):
                 break 
 
@@ -192,32 +192,23 @@ print(f'\nEnvío completado en {t_total:.1f} s '
       f'({t_total/N_VAL*1000:.1f} ms por fila)')
 
 # ─── Desescalar predicciones ─────────────────────────────────────────
-# El ESP32 devuelve el valor normalizado [0,1].
-# Python lo desescala con scaler_y.
-# NOTA: si el ESP32 ya devuelve W directamente (con denormalize_output
-# implementado en C++), omite este paso.
+# CORRECCIÓN 2: Aplicación del inverse_transform para tener los datos en W
 preds_w = raw_preds.copy()
 mask_recibido = ~np.isnan(preds_w)
-preds_w = np.maximum(preds_w, 0)   # clipping físico
+
+# idx_recibidos = np.where(mask_recibido)[0]
+# if len(idx_recibidos) > 0:
+#     # Desescalamos usando el scaler que entrenamos al principio
+#     preds_w[idx_recibidos] = scaler_y.inverse_transform(preds_w[idx_recibidos].reshape(-1, 1)).flatten()
+
+preds_w = np.maximum(preds_w, 0)   # clipping físico (nunca tendremos potencia negativa)
 
 # ─── Aplicar máscara de ventanas válidas ──────────────────────────────
-# Solo conservamos predicciones donde:
-# 1. La ventana es temporalmente continua (sin saltos noche→día)
-# 2. Se recibió predicción del ESP32 (no NaN)
-# 3. El índice del target está dentro del rango
 mask_final = (
     ventana_valida &
     mask_recibido &
     (target_idx_arr >= 0)
 )
-
-# ─── DIAGNÓSTICO DEFINITIVO ───
-# print(f"\n--- DIAGNÓSTICO DE FILTROS ---")
-# print(f"1. Ventanas correctas (Fechas CSV Python): {ventana_valida.sum()}")
-# print(f"2. Predicciones recibidas (Enviadas por ESP32): {mask_recibido.sum()}")
-# print(f"3. Intersección final (Válidas para gráfica): {mask_final.sum()}")
-# import sys; sys.exit() # Cortamos la ejecución aquí para que no salte el error
-# ──────────────────────────────
 
 # Extraer valores finales alineados
 idx_validos   = np.where(mask_final)[0]
@@ -288,9 +279,8 @@ print(f'    ΔMAE  completo  = {mae_c  - V13_REF["mae_c"]:+.1f} W')
 print(f'    ΔR²   completo  = {r2_c   - V13_REF["r2_c"]:+.4f}')
 
 # ─── Guardar resultados CSV ───────────────────────────────────────────
-# Generar nombre de carpeta único con la fecha y hora actual
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-out_dir = os.path.join("eval_embebidos", f"run_{timestamp}_{MODELO_ACTUAL}")
+out_dir = os.path.join("train_LSTM/Pmax_4549W/eval_emb_lstm", f"run_{timestamp}_{MODELO_ACTUAL}")
 os.makedirs(out_dir, exist_ok=True)
 
 df_out = pd.DataFrame({
@@ -301,13 +291,11 @@ df_out = pd.DataFrame({
     'latencia_us':   lats_final,
 })
 
-# Guardamos el CSV dentro de la nueva carpeta
 csv_path = os.path.join(out_dir, 'resultados_hardware.csv')
 df_out.to_csv(csv_path, index=False)
 print(f'\n[OK] Resultados guardados en: {csv_path}')
 
 # ─── Gráficas (Calidad Imprenta TFG) ──────────────────────────────────
-
 # 1. Gráfica de Dispersión
 plt.figure(figsize=(8, 6))
 plt.scatter(targets_final, preds_final, alpha=0.4, s=15, color='#2E5090')
@@ -341,7 +329,7 @@ plt.close()
 if len(lats_validas) > 0:
     plt.figure(figsize=(8, 6))
     plt.hist(lats_validas / 1000, bins=60,
-             color='#43A047', edgecolor='black', lw=0.8) # Borde negro para imprimir bien
+             color='#43A047', edgecolor='black', lw=0.8)
     plt.axvline(lats_validas.mean() / 1000, color='black', ls='--', lw=2.5,
                 label=f'Media: {lats_validas.mean()/1000:.2f} ms')
     plt.axvline(np.percentile(lats_validas, 95) / 1000,
@@ -360,7 +348,6 @@ print('\n[OK] Gráficas generadas por separado a 300 DPI y guardadas con éxito.
 
 # 1. GRÁFICA DE JUSTIFICACIÓN DEL UMBRAL (Irradiancia)
 plt.figure(figsize=(10, 4))
-# Cogemos un tramo de unos 3 días (ej: 400 pasos de 10 min) para que se vea claro
 tramo = 400 
 plt.plot(g_final[:tramo], color='#F39C12', lw=2, label='Irradiancia Global (G_Glob)')
 plt.axhline(y=UMBRAL_DIA, color='red', linestyle='--', lw=2, 

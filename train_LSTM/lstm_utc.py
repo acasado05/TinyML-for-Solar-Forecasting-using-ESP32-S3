@@ -19,7 +19,7 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 # =====================================================================
 # GUARDADO DE VERSIONES DE LAS GRÁFICAS DE VALIDACIÓN Y RESULTADOS
 # =====================================================================
-ruta_base = 'train_LSTM'
+ruta_base = 'train_LSTM/Pmax_722W'
 prefijo = 'entrenamiento_v'
 os.makedirs(ruta_base, exist_ok=True)
 carpetas_existentes = [d for d in os.listdir(ruta_base) if os.path.isdir(os.path.join(ruta_base, d)) and d.startswith(prefijo)]
@@ -42,7 +42,7 @@ os.makedirs(carpeta_salida, exist_ok=True)
 
 # 1. CARGA, PROCESADO Y LIMPIEZA DE DATOS
 try:
-    csv = 'train_LSTM/datos_10min_utc.csv'
+    csv = 'train_LSTM/datos_10min_722W_horabuena.csv'
     data = pd.read_csv(csv, sep=';', decimal=',')
     print(f"DATOS CARGADOS CORRECTAMENTE")
 except FileNotFoundError:
@@ -93,6 +93,51 @@ val_df = data_selected.iloc[train_split:]
 
 print(f"Entrenamiento (80%): {len(train_df)} filas")
 print(f"Validación (20%): {len(val_df)} filas")
+# Definimos cuál es la columna objetivo, como se sugiere en la imagen
+TARGET = 'Pot_inv'
+
+# 1. Obtenemos las características (X) de train como un array de numpy
+train_X_raw = train_df.drop(columns=[TARGET]).values
+
+# Calculamos la media de cada columna del conjunto de entrenamiento.
+# Usamos np.nanmean para ignorar los NaNs en el cálculo de la media.
+# Esta media es la que usaremos para imputar tanto en train como en val.
+col_means_train = np.nanmean(train_X_raw, axis=0)
+
+# Verificamos si hay NaNs en el conjunto de entrenamiento
+if np.isnan(train_X_raw).any():
+    print("[WARN] NaN detectados en train, imputando con media global...")
+   
+    # Bucle para imputar cada columna
+    for col_idx in range(train_X_raw.shape[1]):
+        nan_mask = np.isnan(train_X_raw[:, col_idx])
+        train_X_raw[nan_mask, col_idx] = col_means_train[col_idx]
+
+    # Reconstruimos el DataFrame de entrenamiento limpio
+    train_df_clean = pd.DataFrame(train_X_raw,
+                                  columns=train_df.drop(columns=[TARGET]).columns,
+                                  index=train_df.index)
+    train_df_clean[TARGET] = train_df[TARGET].values
+    train_df = train_df_clean
+
+# 2. Imputamos también el conjunto de validación, usando las MEDIAS DE TRAIN.
+# Es vital no calcular nuevas medias en validación para evitar data leakage.
+val_X_raw = val_df.drop(columns=[TARGET]).values
+
+if np.isnan(val_X_raw).any():
+    print("[WARN] NaN detectados en validación, imputando con media de train...")
+   
+    # Usamos el mismo bucle con col_means_train
+    for col_idx in range(val_X_raw.shape[1]):
+        nan_mask = np.isnan(val_X_raw[:, col_idx])
+        val_X_raw[nan_mask, col_idx] = col_means_train[col_idx]
+
+    # Reconstruimos el DataFrame de validación limpio
+    val_df_clean = pd.DataFrame(val_X_raw,
+                                columns=val_df.drop(columns=[TARGET]).columns,
+                                index=val_df.index)
+    val_df_clean[TARGET] = val_df[TARGET].values
+    val_df = val_df_clean
 
 # 3.2. Normalización de los datos utilizando MinMaxScaler
 scaler_X = MinMaxScaler()

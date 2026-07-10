@@ -7,8 +7,8 @@ import json
 import os
 
 # ─── Parámetros (mismos que V13) ──────────────────────────────────────
-EXPORT_DIR   = 'train_LSTM/exportacion_micro'
-CSV_PATH     = 'train_LSTM/datos_10min_utc.csv'
+EXPORT_DIR   = 'train_LSTM/Pmax_722W/exportacion_micro'
+CSV_PATH     = 'train_LSTM/datos_10min_722W_horabuena.csv'
 SEQ_LENGTH   = 18
 LOOK_AHEAD   = 6
 FEATURES     = ['hora_sin','hora_cos','mes_sin','mes_cos',
@@ -87,8 +87,7 @@ def evaluar(nombre, preds_real):
     return {'mae':mae,'rmse':rmse,'r2':r2,'mae_d':mae_d,'r2_d':r2_d}
 
 modelos = {
-    'LSTM': 'train_LSTM/entrenamiento_v1/LSTM_mejor.h5',
-    #'GRU':  'train_LSTM/nuevo_GRU/GRU_mejor.h5',
+    'LSTM': 'train_LSTM/Pmax_722W/entrenamiento_v1/LSTM_mejor.h5',
 }
 
 resultados = {}

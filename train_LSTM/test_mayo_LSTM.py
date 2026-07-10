@@ -15,7 +15,7 @@ PORT          = 'COM14'
 BAUDRATE      = 115200
 TIMEOUT       = 2
 MODELO_ACTUAL = 'LSTM_cmpt'
-CSV_PATH      = 'test_LSTM/datos_2sem_arreglado.csv'
+CSV_PATH      = 'train_LSTM/datos_2sem_arreglado.csv'
 SEQ_LEN       = 18
 LOOK_AHEAD    = 6
 FEATURES      = ['hora_sin', 'hora_cos', 'mes_sin', 'mes_cos',
@@ -27,7 +27,7 @@ UMBRAL_DIA    = 40.0   # W/m² — umbral G_Glob para métrica diurna
 # Generar nombre de carpeta único con la fecha y hora actual
 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 directorio_script = os.path.dirname(os.path.abspath(__file__))
-out_dir = os.path.join(directorio_script, "test_LSTM", f"run_{timestamp}_{MODELO_ACTUAL}")
+out_dir = os.path.join("train_LSTM/Pmax_4549W/eval_mayo", f"run_{timestamp}_{MODELO_ACTUAL}")
 os.makedirs(out_dir, exist_ok=True)
 
 df = pd.read_csv(CSV_PATH, sep=';', decimal=',')
